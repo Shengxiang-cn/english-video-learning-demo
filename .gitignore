@@ -9,6 +9,7 @@
 node_modules/
 dist/
 .runtime/
+desktop-web-demo/data/
 desktop-web-demo/desktop-*.png
 
 mobile-app-design/prototype/mobile-learning-app/node_modules/

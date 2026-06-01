@@ -5,6 +5,10 @@ services:
     rootDir: desktop-web-demo
     buildCommand: npm ci && npm run build
     startCommand: npm start
+    disk:
+      name: video-learning-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: KIMI_API_KEY
         sync: false
@@ -14,3 +18,5 @@ services:
         value: kimi-k2.5
       - key: HOST
         value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data

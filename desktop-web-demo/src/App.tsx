@@ -40,6 +40,11 @@ type SavedNote = {
   source: 'manual' | 'ai' | 'highlight'
 }
 
+type ServerLibrary = {
+  videos?: DemoVideo[]
+  notes?: SavedNote[]
+}
+
 type TranscriptSelection = {
   quote: string
   timestamp: string
@@ -145,6 +150,52 @@ function App() {
 
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
   const chatAnswer = aiAnswer || chatResponse
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadLibrary() {
+      try {
+        const response = await fetch('/api/library')
+        if (!response.ok) {
+          return
+        }
+
+        const data = (await response.json()) as ServerLibrary
+        if (!isMounted) {
+          return
+        }
+
+        const persistedVideos = data.videos ?? []
+        const persistedNotes = data.notes ?? []
+        const mergedVideos = [
+          ...persistedVideos,
+          ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
+        ]
+        const mergedIds = [
+          ...persistedVideos.map((video) => video.id),
+          ...initialLibraryIds.filter((id) => !persistedVideos.some((video) => video.id === id)),
+        ]
+
+        setVideos(mergedVideos)
+        setLibraryIds(mergedIds)
+        setSavedNotes(persistedNotes)
+
+        if (persistedVideos.length > 0) {
+          setSelectedVideoId(persistedVideos[0].id)
+          setCurrentPosition(persistedVideos[0].lastPositionSec || persistedVideos[0].transcript[0]?.startSec || 0)
+        }
+      } catch {
+        setToast('Local API is unavailable, using demo data for now.')
+      }
+    }
+
+    void loadLibrary()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   useEffect(() => {
     if (screen !== 'reader' || !isPlaying || transcript.length === 0) {
@@ -382,7 +433,7 @@ function App() {
     }
   }
 
-  function saveNote(source: SavedNote['source']) {
+  async function saveNote(source: SavedNote['source']) {
     if (!selectedQuote) {
       return
     }
@@ -407,13 +458,28 @@ function App() {
     setRightTab('notebook')
     setShowNoteModal(false)
     clearNativeSelection()
-    setToast(
+    const savedMessage =
       source === 'ai'
         ? 'Saved AI note to notebook.'
         : source === 'highlight'
           ? 'Saved highlighted passage to notebook.'
-          : 'Saved note to notebook.',
-    )
+          : 'Saved note to notebook.'
+    setToast(savedMessage)
+
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        throw new Error(data?.error ?? 'Failed to persist note.')
+      }
+    } catch {
+      setToast('Note is saved on screen, but server persistence failed.')
+    }
   }
 
   function handleExportMarkdown() {

@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { YoutubeTranscript } from 'youtube-transcript'
@@ -11,9 +12,55 @@ const port = Number(process.env.PORT ?? 4174)
 const host = process.env.HOST ?? '0.0.0.0'
 const kimiBaseUrl = process.env.KIMI_BASE_URL ?? 'https://api.moonshot.cn/v1'
 const kimiModel = process.env.KIMI_MODEL ?? 'kimi-k2.5'
+const dataDir = process.env.DATA_DIR ?? path.join(__dirname, 'data')
+const storePath = path.join(dataDir, 'store.json')
 
 app.use(cors())
 app.use(express.json({ limit: '1mb' }))
+
+const defaultStore = {
+  videos: [],
+  notes: [],
+}
+
+async function readStore() {
+  try {
+    const raw = await fs.readFile(storePath, 'utf8')
+    const parsed = JSON.parse(raw)
+    return {
+      videos: Array.isArray(parsed.videos) ? parsed.videos : [],
+      notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn(`Unable to read store: ${error.message}`)
+    }
+    return defaultStore
+  }
+}
+
+async function writeStore(store) {
+  await fs.mkdir(dataDir, { recursive: true })
+  const tmpPath = `${storePath}.tmp`
+  await fs.writeFile(tmpPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
+  await fs.rename(tmpPath, storePath)
+}
+
+async function upsertStoredVideo(video) {
+  const store = await readStore()
+  const videos = [video, ...store.videos.filter((item) => item.id !== video.id)]
+  const nextStore = { ...store, videos }
+  await writeStore(nextStore)
+  return video
+}
+
+async function upsertStoredNote(note) {
+  const store = await readStore()
+  const notes = [note, ...store.notes.filter((item) => item.id !== note.id)]
+  const nextStore = { ...store, notes }
+  await writeStore(nextStore)
+  return note
+}
 
 function parseYoutubeId(input) {
   try {
@@ -107,6 +154,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+app.get('/api/library', async (_req, res) => {
+  const store = await readStore()
+  res.json(store)
+})
+
 app.post('/api/youtube/import', async (req, res) => {
   try {
     const url = String(req.body?.url ?? '').trim()
@@ -125,7 +177,7 @@ app.post('/api/youtube/import', async (req, res) => {
     const transcript = normalizeTranscript(transcriptItems)
     const durationSec = Math.max(transcript.at(-1)?.endSec ?? 0, 300)
 
-    res.json({
+    const importedVideo = {
       id: `youtube-${youtubeId}`,
       title: metadata.title ?? `YouTube video ${youtubeId}`,
       channel: metadata.author_name ?? 'YouTube',
@@ -141,10 +193,35 @@ app.post('/api/youtube/import', async (req, res) => {
       coverEyebrow: metadata.author_name ?? 'YouTube',
       coverTitle: metadata.title ?? `YouTube video ${youtubeId}`,
       coverDetail: 'Imported YouTube video with transcript',
+      sourceType: 'youtube',
+      savedAt: new Date().toISOString(),
       transcript,
-    })
+    }
+
+    await upsertStoredVideo(importedVideo)
+    res.json(importedVideo)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to import this YouTube video.'
+    res.status(500).json({ error: message })
+  }
+})
+
+app.post('/api/notes', async (req, res) => {
+  try {
+    const note = req.body?.note
+    if (!note?.id || !note?.videoId || !note?.quote) {
+      return res.status(400).json({ error: 'Missing note fields.' })
+    }
+
+    const storedNote = {
+      ...note,
+      savedAt: new Date().toISOString(),
+    }
+
+    await upsertStoredNote(storedNote)
+    res.json(storedNote)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to save note.'
     res.status(500).json({ error: message })
   }
 })
