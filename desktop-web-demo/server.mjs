@@ -8,7 +8,7 @@ import { YoutubeTranscript } from 'youtube-transcript'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const port = Number(process.env.PORT ?? 4174)
-const host = process.env.HOST ?? '127.0.0.1'
+const host = process.env.HOST ?? '0.0.0.0'
 const kimiBaseUrl = process.env.KIMI_BASE_URL ?? 'https://api.moonshot.cn/v1'
 const kimiModel = process.env.KIMI_MODEL ?? 'kimi-k2.5'
 

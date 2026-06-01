@@ -33,3 +33,4 @@ Deployment note:
 
 - GitHub Pages can host the static UI, but it cannot securely run the Kimi API proxy or YouTube transcript parser.
 - For the real online version, deploy this folder as a Node app on a server platform such as Render, Railway, Fly.io, or Vercel with a server runtime and set the `.env.example` variables there.
+- A Render blueprint is included at `../render.yaml`; connect the GitHub repo and set `KIMI_API_KEY` in Render's environment variables.

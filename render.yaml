@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: english-video-learning-demo
+    runtime: node
+    rootDir: desktop-web-demo
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: KIMI_API_KEY
+        sync: false
+      - key: KIMI_BASE_URL
+        value: https://api.moonshot.cn/v1
+      - key: KIMI_MODEL
+        value: kimi-k2.5
+      - key: HOST
+        value: 0.0.0.0
