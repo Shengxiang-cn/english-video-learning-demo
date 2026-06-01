@@ -4,7 +4,7 @@ import express from 'express'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { YoutubeTranscript } from 'youtube-transcript'
+import { fetchYouTubeTranscript } from './youtube-transcript-provider.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -99,8 +99,9 @@ function normalizeTranscript(items) {
     .filter((item) => item.text?.trim())
     .slice(0, 240)
     .map((item, index) => {
-      const startSec = Math.round(Number(item.offset) / 1000)
-      const durationSec = Math.max(2, Math.round(Number(item.duration) / 1000))
+      const hasOffsetMs = item.offset !== undefined
+      const startSec = Math.round(hasOffsetMs ? Number(item.offset) / 1000 : Number(item.start))
+      const durationSec = Math.max(2, Math.round(hasOffsetMs ? Number(item.duration) / 1000 : Number(item.duration)))
       return {
         id: `yt-${index + 1}`,
         startSec,
@@ -136,18 +137,13 @@ async function fetchOembed(url) {
 }
 
 async function fetchTranscript(youtubeId) {
-  const withTimeout = (promise) =>
-    Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Transcript request timed out.')), 6000)
-      }),
-    ])
-
-  return Promise.any([
-    withTimeout(YoutubeTranscript.fetchTranscript(youtubeId, { lang: 'en' })),
-    withTimeout(YoutubeTranscript.fetchTranscript(youtubeId)),
-  ]).catch(() => [])
+  return fetchYouTubeTranscript(youtubeId, { language: 'en' }).catch((error) => ({
+    segments: [],
+    language: null,
+    availableLanguages: [],
+    source: null,
+    error: { code: error?.code ?? 'UNKNOWN', message: error?.message ?? 'Transcript request failed.' },
+  }))
 }
 
 app.get('/api/health', (_req, res) => {
@@ -169,12 +165,12 @@ app.post('/api/youtube/import', async (req, res) => {
     }
 
     const canonicalUrl = `https://www.youtube.com/watch?v=${youtubeId}`
-    const [metadata, transcriptItems] = await Promise.all([
+    const [metadata, transcriptResult] = await Promise.all([
       fetchOembed(canonicalUrl),
       fetchTranscript(youtubeId),
     ])
 
-    const transcript = normalizeTranscript(transcriptItems)
+    const transcript = normalizeTranscript(transcriptResult.segments ?? [])
     const durationSec = Math.max(transcript.at(-1)?.endSec ?? 0, 300)
 
     const importedVideo = {
@@ -195,6 +191,10 @@ app.post('/api/youtube/import', async (req, res) => {
       coverDetail: 'Imported YouTube video with transcript',
       sourceType: 'youtube',
       savedAt: new Date().toISOString(),
+      transcriptLanguage: transcriptResult.language,
+      transcriptSource: transcriptResult.source,
+      transcriptLanguages: transcriptResult.availableLanguages,
+      transcriptError: transcript.length === 0 ? transcriptResult.error ?? null : null,
       transcript,
     }
 
