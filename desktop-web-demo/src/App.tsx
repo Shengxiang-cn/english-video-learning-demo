@@ -20,7 +20,6 @@ import './App.css'
 import {
   askSuggestions,
   catalogVideos,
-  importExamples,
   initialLibraryIds,
   type DemoVideo,
 } from './mockData'
@@ -57,6 +56,8 @@ const sidebarCollections = [
   { label: 'Videos', icon: Video },
   { label: 'Tags', icon: Tag },
 ]
+
+const defaultImportUrl = 'https://www.youtube.com/watch?v=3Y8aq_ofEVs'
 
 function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -123,7 +124,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showNoteModal, setShowNoteModal] = useState(false)
-  const [linkInput, setLinkInput] = useState(importExamples[2].url)
+  const [linkInput, setLinkInput] = useState(defaultImportUrl)
   const [chatPrompt, setChatPrompt] = useState(askSuggestions[1])
   const [aiAnswer, setAiAnswer] = useState('')
   const [isAsking, setIsAsking] = useState(false)
@@ -606,7 +607,11 @@ function App() {
               <span>{screen === 'library' ? 'Date moved' : 'Sort by timestamp'}</span>
               <ChevronDown size={16} />
             </button>
-            <button className="icon-button" type="button" onClick={() => setShowAddModal(true)}>
+            <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAddModal(true)}>
+              <Plus size={18} />
+              <span>Add YouTube URL</span>
+            </button>
+            <button className="icon-button icon-button--mobile" type="button" onClick={() => setShowAddModal(true)} aria-label="Add YouTube URL">
               <Plus size={18} />
             </button>
           </div>
@@ -615,6 +620,27 @@ function App() {
         {screen === 'library' ? (
           <div className="library-layout">
             <section className="list-pane">
+              <form
+                className="url-import-bar"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void handleImportUrl()
+                }}
+              >
+                <label>
+                  <span>YouTube URL</span>
+                  <input
+                    value={linkInput}
+                    onChange={(event) => setLinkInput(event.target.value)}
+                    placeholder="Paste a YouTube URL, then import subtitles"
+                    disabled={isImporting}
+                  />
+                </label>
+                <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
+                  {isImporting ? 'Parsing...' : 'Parse URL'}
+                </button>
+              </form>
+
               <div className="rows">
                 {libraryIds.map((videoId, index) => {
                   const video = findVideoById(videos, videoId)
@@ -1039,6 +1065,9 @@ function App() {
                   placeholder="Paste a YouTube URL"
                   disabled={isImporting}
                 />
+                <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
+                  {isImporting ? 'Parsing...' : 'Import video'}
+                </button>
                 <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowAddModal(false)}>
                   {isImporting ? <span className="add-modal__spinner" /> : <X size={20} />}
                 </button>
