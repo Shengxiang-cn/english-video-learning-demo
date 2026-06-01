@@ -97,7 +97,6 @@ function formatDuration(seconds) {
 function normalizeTranscript(items) {
   return items
     .filter((item) => item.text?.trim())
-    .slice(0, 240)
     .map((item, index) => {
       const hasOffsetMs = item.offset !== undefined
       const startSec = Math.round(hasOffsetMs ? Number(item.offset) / 1000 : Number(item.start))
