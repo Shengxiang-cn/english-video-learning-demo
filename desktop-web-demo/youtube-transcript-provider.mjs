@@ -301,6 +301,67 @@ async function downloadCaptions(track) {
   throw new YouTubeTranscriptError('CAPTION_FETCH_FAILED', `Could not download caption track: ${lastError?.message ?? 'empty response'}`)
 }
 
+function normalizeThirdPartySegments(items) {
+  if (!Array.isArray(items)) return []
+
+  const sample = items
+    .slice(0, 5)
+    .map((item) => Number(item?.offset ?? item?.start ?? 0))
+    .filter((value) => value > 0)
+  const looksLikeMilliseconds = sample.length > 0 && sample.reduce((sum, value) => sum + value, 0) / sample.length > 500
+
+  return items
+    .map((item) => {
+      const rawStart = Number(item?.offset ?? item?.start ?? 0)
+      const rawDuration = Number(item?.duration ?? item?.dur ?? 0)
+      return {
+        text: cleanCaptionText(item?.text ?? item?.content ?? ''),
+        start: looksLikeMilliseconds ? rawStart / 1000 : rawStart,
+        duration: looksLikeMilliseconds ? rawDuration / 1000 : rawDuration,
+      }
+    })
+    .filter((segment) => segment.text)
+}
+
+async function fetchSupadataTranscript(videoId, language) {
+  const apiKey = process.env.SUPADATA_API_KEY
+  if (!apiKey) return null
+
+  const url = new URL('https://api.supadata.ai/v1/transcript')
+  url.searchParams.set('url', `https://www.youtube.com/watch?v=${videoId}`)
+  if (language) url.searchParams.set('lang', language)
+
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+    },
+    20000,
+  )
+
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new YouTubeTranscriptError('SUPADATA_REJECTED', body?.error ?? body?.message ?? `Supadata returned ${response.status}.`)
+  }
+
+  const content = Array.isArray(body?.content) ? body.content : Array.isArray(body?.transcript) ? body.transcript : Array.isArray(body) ? body : []
+  const segments = normalizeThirdPartySegments(content)
+
+  if (segments.length === 0) {
+    throw new YouTubeTranscriptError('SUPADATA_EMPTY', 'Supadata returned no transcript segments.')
+  }
+
+  return {
+    segments,
+    language: typeof body?.lang === 'string' ? body.lang : language ?? null,
+    availableLanguages: Array.isArray(body?.availableLangs) ? body.availableLangs.filter((item) => typeof item === 'string') : [],
+    source: 'Supadata',
+  }
+}
+
 function shouldTryNext(error) {
   return ['PAGE_FETCH_FAILED', 'BOT_DETECTED', 'IP_BLOCKED', 'INNERTUBE_REJECTED', 'CAPTION_FETCH_FAILED'].includes(error.code)
 }
@@ -337,6 +398,16 @@ export async function fetchYouTubeTranscript(videoId, options = {}) {
       lastError = error
       console.warn(`[youtube-transcript] ${client.label} failed for ${videoId}: ${error.code ?? 'UNKNOWN'} ${error.message}`)
       if (error instanceof YouTubeTranscriptError && !shouldTryNext(error)) break
+    }
+  }
+
+  if (process.env.SUPADATA_API_KEY) {
+    try {
+      const supadataResult = await fetchSupadataTranscript(videoId, options.language ?? 'en')
+      if (supadataResult) return supadataResult
+    } catch (error) {
+      lastError = error
+      console.warn(`[youtube-transcript] Supadata failed for ${videoId}: ${error.code ?? 'UNKNOWN'} ${error.message}`)
     }
   }
 
