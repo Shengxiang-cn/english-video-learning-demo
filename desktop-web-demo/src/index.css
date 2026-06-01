@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --font-sans: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --ink-strong: #1f1814;
+  --ink-soft: #5c4c42;
+  --ink-muted: #64564c;
+  --ink-faint: #8c7f76;
+  --accent-red: #d15940;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--ink-strong);
+  background:
+    radial-gradient(circle at top left, rgba(255, 199, 165, 0.72), transparent 24%),
+    radial-gradient(circle at bottom right, rgba(255, 237, 199, 0.72), transparent 24%),
+    linear-gradient(180deg, #fffaf4 0%, #f3ede6 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+main {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+@media (max-width: 520px) {
+  main {
+    padding: 0;
+  }
+}

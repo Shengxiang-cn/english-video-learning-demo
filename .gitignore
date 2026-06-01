@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+*.pid
+*.tsbuildinfo
+
+node_modules/
+dist/
+.runtime/
+desktop-web-demo/desktop-*.png
+
+mobile-app-design/prototype/mobile-learning-app/node_modules/
+mobile-app-design/prototype/mobile-learning-app/dist/
+mobile-app-design/prototype/mobile-learning-app/.vite-*.log
+mobile-app-design/prototype/mobile-learning-app/.vite-*.pid
