@@ -63,6 +63,10 @@ function videoById(id: string) {
   return catalogVideos.find((video) => video.id === id) ?? catalogVideos[0]
 }
 
+function findVideoById(videos: DemoVideo[], id: string) {
+  return videos.find((video) => video.id === id) ?? videos[0]
+}
+
 function buildTakeaway(video: DemoVideo, quote: string) {
   if (!quote) {
     return `Select a difficult passage in ${video.channel} to ask AI or save a note.`
@@ -96,13 +100,18 @@ function handleFromChannel(channel: string) {
 }
 
 function getHostnameLabel(url: string) {
-  return new URL(url).hostname.replace('www.', '')
+  try {
+    return new URL(url).hostname.replace('www.', '')
+  } catch {
+    return 'youtube.com'
+  }
 }
 
 function App() {
   const [screen, setScreen] = useState<Screen>('library')
   const [rightTab, setRightTab] = useState<RightTab>('info')
   const [inboxTab, setInboxTab] = useState<InboxTab>('inbox')
+  const [videos, setVideos] = useState<DemoVideo[]>(catalogVideos)
   const [libraryIds, setLibraryIds] = useState(initialLibraryIds)
   const [selectedVideoId, setSelectedVideoId] = useState(initialLibraryIds[0])
   const [currentPosition, setCurrentPosition] = useState(videoById(initialLibraryIds[0]).lastPositionSec)
@@ -111,6 +120,9 @@ function App() {
   const [showNoteModal, setShowNoteModal] = useState(false)
   const [linkInput, setLinkInput] = useState(importExamples[2].url)
   const [chatPrompt, setChatPrompt] = useState(askSuggestions[1])
+  const [aiAnswer, setAiAnswer] = useState('')
+  const [isAsking, setIsAsking] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [noteDraft, setNoteDraft] = useState(
     'This passage matters because it reframes the design process as an adaptive learning loop.'
   )
@@ -119,8 +131,9 @@ function App() {
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
+  const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
 
-  const selectedVideo = videoById(selectedVideoId)
+  const selectedVideo = findVideoById(videos, selectedVideoId)
   const transcript = selectedVideo.transcript
   const selectedQuote = transcriptSelection?.quote ?? ''
   const selectedTimestamp = transcriptSelection?.timestamp ?? formatTime(selectedVideo.lastPositionSec)
@@ -131,9 +144,10 @@ function App() {
   const selectedSegmentIds = transcriptSelection?.segmentIds ?? []
 
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
+  const chatAnswer = aiAnswer || chatResponse
 
   useEffect(() => {
-    if (screen !== 'reader' || !isPlaying) {
+    if (screen !== 'reader' || !isPlaying || transcript.length === 0) {
       return
     }
 
@@ -149,6 +163,10 @@ function App() {
 
     return () => window.clearInterval(timer)
   }, [isPlaying, screen, transcript])
+
+  useEffect(() => {
+    setAiAnswer('')
+  }, [selectedVideoId, selectedQuote])
 
   useEffect(() => {
     if (!toast) {
@@ -235,14 +253,26 @@ function App() {
     setTranscriptSelection(null)
   }
 
+  function sendYoutubeCommand(func: 'playVideo' | 'pauseVideo' | 'seekTo', args: unknown[] = []) {
+    youtubeFrameRef.current?.contentWindow?.postMessage(
+      JSON.stringify({
+        event: 'command',
+        func,
+        args,
+      }),
+      '*',
+    )
+  }
+
   function openReader(videoId: string) {
-    const video = videoById(videoId)
+    const video = findVideoById(videos, videoId)
 
     startTransition(() => {
       setSelectedVideoId(videoId)
       setScreen('reader')
       setRightTab('info')
       setCurrentPosition(video.lastPositionSec || video.transcript[0]?.startSec || 0)
+      setIsPlaying(false)
     })
 
     clearNativeSelection()
@@ -258,16 +288,98 @@ function App() {
 
   function handleSeek(startSec: number) {
     setCurrentPosition(startSec)
+    if (selectedVideo.youtubeId) {
+      sendYoutubeCommand('seekTo', [startSec, true])
+      sendYoutubeCommand('playVideo')
+      setIsPlaying(true)
+    }
   }
 
-  function handleImport(videoId: string) {
-    if (!libraryIds.includes(videoId)) {
-      setLibraryIds((current) => [videoId, ...current])
+  function togglePlayback() {
+    setIsPlaying((playing) => {
+      const next = !playing
+      if (selectedVideo.youtubeId) {
+        sendYoutubeCommand(next ? 'playVideo' : 'pauseVideo')
+      }
+      return next
+    })
+  }
+
+  async function handleImportUrl() {
+    const url = linkInput.trim()
+    if (!url) {
+      setToast('Paste a YouTube URL first.')
+      return
     }
 
-    setShowAddModal(false)
-    setSelectedVideoId(videoId)
-    setToast('Video imported into Library.')
+    setIsImporting(true)
+    setToast('Importing YouTube metadata and subtitles...')
+
+    try {
+      const response = await fetch('/api/youtube/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? 'Failed to import this YouTube URL.')
+      }
+
+      const importedVideo = data as DemoVideo
+      setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
+      setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
+      setSelectedVideoId(importedVideo.id)
+      setCurrentPosition(importedVideo.lastPositionSec || importedVideo.transcript[0]?.startSec || 0)
+      setShowAddModal(false)
+      setToast(
+        importedVideo.transcript.length
+          ? 'Imported video card with subtitles.'
+          : 'Imported video card, but no transcript was found.',
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to import this YouTube URL.'
+      setToast(message)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  async function handleAskAi() {
+    if (!chatPrompt.trim()) {
+      setToast('Type a question for AI first.')
+      return
+    }
+
+    setRightTab('chat')
+    setIsAsking(true)
+    setToast('Asking Kimi about this video...')
+
+    try {
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video: selectedVideo,
+          question: chatPrompt,
+          quote: selectedQuote,
+        }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? 'AI request failed.')
+      }
+
+      setAiAnswer(String(data.answer ?? 'No answer returned.'))
+      setToast('Kimi answer is ready.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI request failed.'
+      setToast(message)
+    } finally {
+      setIsAsking(false)
+    }
   }
 
   function saveNote(source: SavedNote['source']) {
@@ -282,11 +394,11 @@ function App() {
       timestamp: selectedTimestamp,
       note:
         source === 'ai'
-          ? `${chatPrompt} ${chatResponse}`
+          ? `${chatPrompt} ${chatAnswer}`
           : source === 'highlight'
             ? 'Saved as a highlighted passage for review later.'
             : noteDraft,
-      takeaway: buildTakeaway(selectedVideo, selectedQuote),
+      takeaway: source === 'ai' ? chatAnswer : buildTakeaway(selectedVideo, selectedQuote),
       tags: ['video-learning', 'transcript', selectedVideo.channel.toLowerCase().replace(/\s+/g, '-')],
       source,
     }
@@ -439,7 +551,7 @@ function App() {
             <section className="list-pane">
               <div className="rows">
                 {libraryIds.map((videoId, index) => {
-                  const video = videoById(videoId)
+                  const video = findVideoById(videos, videoId)
                   const isActive = video.id === selectedVideoId
 
                   return (
@@ -571,10 +683,15 @@ function App() {
                     <blockquote className="chat-quote">
                       {selectedQuote || 'Select transcript text first. Your exact highlighted words will show up here.'}
                     </blockquote>
-                    <p>{chatResponse}</p>
-                    <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                      Save to notebook
-                    </button>
+                    <p>{chatAnswer}</p>
+                    <div className="chat-card__actions">
+                      <button className="secondary-button" type="button" onClick={handleAskAi} disabled={isAsking}>
+                        {isAsking ? 'Asking Kimi...' : 'Ask Kimi'}
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
+                        Save to notebook
+                      </button>
+                    </div>
                   </article>
                 </div>
               ) : null}
@@ -617,8 +734,20 @@ function App() {
 
               <div className="reader-scroll">
                 <article className="reader-hero">
-                  <div className="reader-hero__frame" style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}>
-                    {selectedVideo.playerImage ?? selectedVideo.coverImage ? (
+                  <div
+                    className={`reader-hero__frame ${selectedVideo.youtubeId ? 'reader-hero__frame--youtube' : ''}`}
+                    style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}
+                  >
+                    {selectedVideo.youtubeId ? (
+                      <iframe
+                        ref={youtubeFrameRef}
+                        className="reader-hero__iframe"
+                        title={selectedVideo.title}
+                        src={`https://www.youtube.com/embed/${selectedVideo.youtubeId}?enablejsapi=1&rel=0&modestbranding=1&origin=${encodeURIComponent(window.location.origin)}`}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                    ) : selectedVideo.playerImage ?? selectedVideo.coverImage ? (
                       <img
                         className="reader-hero__image"
                         alt={selectedVideo.title}
@@ -627,7 +756,7 @@ function App() {
                     ) : null}
                     <div className="reader-hero__scrim" />
 
-                    <button className="play-button play-button--center" type="button" onClick={() => setIsPlaying((value) => !value)}>
+                    <button className="play-button play-button--center" type="button" onClick={togglePlayback}>
                       {isPlaying ? 'Pause' : 'Play'}
                     </button>
 
@@ -648,6 +777,12 @@ function App() {
                 <section className="reader-text">
                   <div className="highlight-bar" />
                   <div ref={transcriptContentRef} className="reader-text__content">
+                    {transcript.length === 0 ? (
+                      <article className="empty-card">
+                        <strong>No transcript found</strong>
+                        <p>This YouTube video was imported, but captions were not available from the public transcript endpoint.</p>
+                      </article>
+                    ) : null}
                     {transcript.map((segment, index) => {
                       const isSelected = selectedSegmentIds.includes(segment.id)
                       const isActive = activeSegmentIndex === index
@@ -709,7 +844,7 @@ function App() {
                     <p>Metadata</p>
                     <dl className="metadata-list">
                       <div><dt>Type</dt><dd>Video</dd></div>
-                      <div><dt>Domain</dt><dd>{new URL(selectedVideo.youtubeUrl).hostname.replace('www.', '')}</dd></div>
+                      <div><dt>Domain</dt><dd>{getHostnameLabel(selectedVideo.youtubeUrl)}</dd></div>
                       <div><dt>Length</dt><dd>{selectedVideo.durationLabel}</dd></div>
                       <div><dt>Progress</dt><dd>{Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</dd></div>
                     </dl>
@@ -770,10 +905,15 @@ function App() {
                     <blockquote className="chat-quote">
                       {selectedQuote || 'Select transcript text first. Your exact highlighted words will show up here.'}
                     </blockquote>
-                    <p>{chatResponse}</p>
-                    <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                      Save to notebook
-                    </button>
+                    <p>{chatAnswer}</p>
+                    <div className="chat-card__actions">
+                      <button className="secondary-button" type="button" onClick={handleAskAi} disabled={isAsking}>
+                        {isAsking ? 'Asking Kimi...' : 'Ask Kimi'}
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
+                        Save to notebook
+                      </button>
+                    </div>
                   </article>
                 </div>
               ) : null}
@@ -823,14 +963,18 @@ function App() {
               exit={{ opacity: 0, y: -16 }}
               onSubmit={(event) => {
                 event.preventDefault()
-                const matchedExample = importExamples.find((example) => example.url === linkInput) ?? importExamples[2]
-                handleImport(matchedExample.videoId)
+                void handleImportUrl()
               }}
             >
               <div className="add-modal__header">
-                <input value={linkInput} onChange={(event) => setLinkInput(event.target.value)} placeholder="URL" />
+                <input
+                  value={linkInput}
+                  onChange={(event) => setLinkInput(event.target.value)}
+                  placeholder="Paste a YouTube URL"
+                  disabled={isImporting}
+                />
                 <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowAddModal(false)}>
-                  <X size={20} />
+                  {isImporting ? <span className="add-modal__spinner" /> : <X size={20} />}
                 </button>
               </div>
             </motion.form>

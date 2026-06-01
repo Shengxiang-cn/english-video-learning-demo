@@ -2,6 +2,9 @@
 *.log
 *.pid
 *.tsbuildinfo
+.env
+.env.*
+!.env.example
 
 node_modules/
 dist/

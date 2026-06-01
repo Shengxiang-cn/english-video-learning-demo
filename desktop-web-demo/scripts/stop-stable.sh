@@ -1,12 +1,23 @@
 #!/bin/sh
 set -eu
 
-SESSION_NAME="desktop-web-demo-preview"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+PID_FILE="$ROOT_DIR/.runtime/server.pid"
 
-if ! screen -ls "$SESSION_NAME" 2>/dev/null | grep -q "$SESSION_NAME"; then
+if ! [ -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  EXISTING_PID="$(lsof -ti tcp:4174 2>/dev/null | head -n 1 || true)"
+  if [ -n "$EXISTING_PID" ]; then
+    kill "$EXISTING_PID"
+    rm -f "$PID_FILE"
+    echo "Stopped stable preview server"
+    exit 0
+  fi
+
   echo "Stable preview server is not running"
+  rm -f "$PID_FILE"
   exit 0
 fi
 
-screen -S "$SESSION_NAME" -X quit
-echo "Stopped stable preview server in screen session $SESSION_NAME"
+kill "$(cat "$PID_FILE")"
+rm -f "$PID_FILE"
+echo "Stopped stable preview server"

@@ -4,12 +4,20 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 LOG_FILE="$RUNTIME_DIR/preview.log"
-SESSION_NAME="desktop-web-demo-preview"
+PID_FILE="$RUNTIME_DIR/server.pid"
 
 mkdir -p "$RUNTIME_DIR"
 
-if screen -ls "$SESSION_NAME" 2>/dev/null | grep -q "$SESSION_NAME"; then
-  echo "Stable preview server already running in screen session $SESSION_NAME"
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "Stable preview server already running with PID $(cat "$PID_FILE")"
+  echo "URL: http://127.0.0.1:4174"
+  exit 0
+fi
+
+EXISTING_PID="$(lsof -ti tcp:4174 2>/dev/null | head -n 1 || true)"
+if [ -n "$EXISTING_PID" ]; then
+  echo "$EXISTING_PID" > "$PID_FILE"
+  echo "Stable preview server already running with PID $EXISTING_PID"
   echo "URL: http://127.0.0.1:4174"
   exit 0
 fi
@@ -17,13 +25,15 @@ fi
 cd "$ROOT_DIR"
 npm run build
 rm -f "$LOG_FILE"
-screen -dmS "$SESSION_NAME" bash -lc "cd \"$ROOT_DIR\" && exec ./node_modules/.bin/vite preview --host 127.0.0.1 --port 4174 --strictPort >\"$LOG_FILE\" 2>&1"
+nohup env HOST=127.0.0.1 PORT=4174 node server.mjs >"$LOG_FILE" 2>&1 &
+echo "$!" > "$PID_FILE"
 sleep 2
 
-if screen -ls "$SESSION_NAME" 2>/dev/null | grep -q "$SESSION_NAME"; then
-  echo "Stable preview server started in screen session $SESSION_NAME"
+if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  echo "Stable preview server started with PID $(cat "$PID_FILE")"
   echo "URL: http://127.0.0.1:4174"
 else
   echo "Stable preview server failed to start"
+  rm -f "$PID_FILE"
   exit 1
 fi

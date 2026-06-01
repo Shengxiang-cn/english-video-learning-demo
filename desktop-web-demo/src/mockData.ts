@@ -16,6 +16,8 @@ export type DemoVideo = {
   lastPositionLabel: string
   summary: string
   youtubeUrl: string
+  youtubeId?: string
+  sourceType?: 'mock' | 'youtube'
   accent: string
   coverImage?: string
   playerImage?: string

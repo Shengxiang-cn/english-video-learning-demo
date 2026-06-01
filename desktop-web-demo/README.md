@@ -13,10 +13,23 @@ The active mobile app prototype now lives in:
 
 Stable local serving:
 
-- `npm run serve:stable`: build the app and run `vite preview` in a detached `screen` session on `127.0.0.1:4174`
+- `npm run serve:stable`: build the app and run the full Node web/API server in the background on `127.0.0.1:4174`
 - `npm run stop:stable`: stop the background preview server
 - `npm run status:stable`: check whether the stable preview server is running
 
 Runtime files for the stable preview server are stored in:
 
 - `.runtime/preview.log`
+
+Full YouTube + AI mode:
+
+- Copy `.env.example` to `.env` locally or set the same variables in your deploy platform.
+- `KIMI_API_KEY` must stay server-side. Do not put it in React code or GitHub Pages.
+- `npm run serve:full` builds the frontend and runs `server.mjs`.
+- `POST /api/youtube/import` imports a YouTube URL, reads metadata, and attempts to fetch English captions.
+- `POST /api/ask` asks Kimi about the imported transcript or highlighted passage.
+
+Deployment note:
+
+- GitHub Pages can host the static UI, but it cannot securely run the Kimi API proxy or YouTube transcript parser.
+- For the real online version, deploy this folder as a Node app on a server platform such as Render, Railway, Fly.io, or Vercel with a server runtime and set the `.env.example` variables there.
