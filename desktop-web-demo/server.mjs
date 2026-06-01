@@ -147,7 +147,15 @@ async function fetchTranscript(youtubeId) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({
+    ok: true,
+    captions: {
+      supadataConfigured: Boolean(process.env.SUPADATA_API_KEY),
+    },
+    ai: {
+      kimiConfigured: Boolean(process.env.KIMI_API_KEY),
+    },
+  })
 })
 
 app.get('/api/library', async (_req, res) => {
