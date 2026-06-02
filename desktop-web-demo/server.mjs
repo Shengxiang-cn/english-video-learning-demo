@@ -157,8 +157,8 @@ function shouldBreakTranscriptLine(current, next) {
   const nextLooksLikeContinuation = /^[a-z,;:)]/.test(next.text)
 
   if (next.startsTurn) return true
-  if (current.text.length >= 620) return true
-  if (wordCount >= 92) return true
+  if (current.text.length >= 1000) return true
+  if (wordCount >= 150) return true
   if (current.text.length >= 360 && !nextLooksLikeContinuation) return true
   if (wordCount >= 54 && !nextLooksLikeContinuation) return true
   if (gap >= 1.4) return true
