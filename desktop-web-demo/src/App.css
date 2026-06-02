@@ -57,6 +57,7 @@
 
 .sidebar__brand {
   padding: 18px 14px;
+  justify-content: flex-start;
 }
 
 .sidebar__brand h1 {
@@ -67,7 +68,6 @@
   color: #1f2b3a;
 }
 
-.sidebar__brand-actions,
 .workspace__group,
 .tabs,
 .reader-controls,

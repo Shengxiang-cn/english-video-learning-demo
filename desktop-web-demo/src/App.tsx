@@ -989,14 +989,6 @@ function App() {
       <aside className="sidebar">
         <div className="sidebar__brand">
           <h1>Reader</h1>
-          <div className="sidebar__brand-actions">
-            <button className="icon-button" type="button">
-              <NotebookPen size={18} />
-            </button>
-            <button className="icon-button" type="button" onClick={() => setShowAddModal(true)}>
-              <Plus size={18} />
-            </button>
-          </div>
         </div>
 
         <nav className="sidebar__main">
