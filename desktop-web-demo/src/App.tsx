@@ -727,6 +727,15 @@ function App() {
       } catch (error) {
         failed.push(batch)
         lastError = error instanceof Error ? error.message : 'Translation failed.'
+        setTranslationStatus({
+          total: totalSegments,
+          completed: Math.min(completed, totalSegments),
+          failed,
+          lastError,
+        })
+        setIsTranslating(false)
+        setToast('Translation paused after a failed batch. Retry failed or continue later.')
+        return
       }
 
       setTranslationStatus({
@@ -738,7 +747,7 @@ function App() {
     }
 
     setIsTranslating(false)
-    setToast(failed.length ? `${failed.length} translation batch failed. Retry from the control bar.` : `${batches[0].language} captions are ready.`)
+    setToast(`${batches[0].language} captions are ready.`)
   }
 
   async function handleTranslateCaptions(language = translationLanguage) {
@@ -1298,7 +1307,7 @@ function App() {
                           />
                         </div>
                         <small>
-                          {isTranslating ? 'Translating' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
+                          {isTranslating ? 'Translating' : translationStatus.failed.length ? 'Paused' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
                           {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
                         </small>
                         {translationStatus.failed.length ? (
