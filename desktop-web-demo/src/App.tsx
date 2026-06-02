@@ -1097,27 +1097,6 @@ function App() {
         {screen === 'library' ? (
           <div className="library-layout">
             <section className="list-pane">
-              <form
-                className="url-import-bar"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void handleImportUrl()
-                }}
-              >
-                <label>
-                  <span>YouTube URL</span>
-                  <input
-                    value={linkInput}
-                    onChange={(event) => setLinkInput(event.target.value)}
-                    placeholder="Paste a YouTube URL, then import subtitles"
-                    disabled={isImporting}
-                  />
-                </label>
-                <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
-                  {isImporting ? 'Parsing...' : 'Parse URL'}
-                </button>
-              </form>
-
               <div className="rows">
                 {libraryIds.map((videoId, index) => {
                   const video = findVideoById(videos, videoId)
