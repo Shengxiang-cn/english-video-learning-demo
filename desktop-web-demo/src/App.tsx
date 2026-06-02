@@ -614,15 +614,7 @@ function App() {
       return
     }
 
-    setChatPrompt(
-      [
-        'Please analyze this highlighted passage:',
-        '',
-        `"${selectedQuote}"`,
-        '',
-        'Explain it in plain English, then tell me why it matters.',
-      ].join('\n'),
-    )
+    setChatPrompt(selectedQuote)
     setRightTab('chat')
     setToast('Highlight copied into chat. Add your question, then send.')
   }
