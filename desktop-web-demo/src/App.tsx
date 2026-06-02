@@ -144,7 +144,7 @@ function App() {
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
-  const [videoScale, setVideoScale] = useState(1)
+  const [readerLeftWidth, setReaderLeftWidth] = useState<number | null>(null)
   const [noteDraft, setNoteDraft] = useState(
     'This passage matters because it reframes the design process as an adaptive learning loop.'
   )
@@ -154,7 +154,7 @@ function App() {
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
-  const readerMainRef = useRef<HTMLElement | null>(null)
+  const readerLayoutRef = useRef<HTMLDivElement | null>(null)
   const autoScrollResetRef = useRef<number | null>(null)
   const isAutoScrollingRef = useRef(false)
 
@@ -490,20 +490,39 @@ function App() {
     }
   }
 
-  function handleVideoResizeStart(event: React.PointerEvent<HTMLButtonElement>) {
-    const container = readerMainRef.current
-    if (!container) return
+  function clampReaderLeftWidth(width: number) {
+    const layout = readerLayoutRef.current
+    const totalWidth = layout?.getBoundingClientRect().width ?? window.innerWidth
+    const minRightPane = 340
+    const minLeftPane = 520
+    const maxLeftPane = Math.max(minLeftPane, totalWidth - minRightPane)
+
+    return Math.min(Math.max(width, minLeftPane), maxLeftPane)
+  }
+
+  function handleVideoResizeStart(mode: 'horizontal' | 'vertical', event: React.PointerEvent<HTMLButtonElement>) {
+    const layout = readerLayoutRef.current
+    if (!layout) return
 
     event.preventDefault()
-    const containerRect = container.getBoundingClientRect()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    const layoutRect = layout.getBoundingClientRect()
+    const heroRect = event.currentTarget.closest('.reader-hero')?.getBoundingClientRect()
+    const heroTop = heroRect?.top ?? layoutRect.top
+
+    const resizeClassName = `is-resizing-video--${mode}`
+    document.body.classList.add('is-resizing-video', resizeClassName)
 
     function handlePointerMove(pointerEvent: PointerEvent) {
-      const nextWidth = pointerEvent.clientX - containerRect.left
-      const nextScale = Math.min(1, Math.max(0.55, nextWidth / containerRect.width))
-      setVideoScale(nextScale)
+      const rawWidth =
+        mode === 'horizontal'
+          ? pointerEvent.clientX - layoutRect.left
+          : (pointerEvent.clientY - heroTop) * (16 / 9)
+      setReaderLeftWidth(clampReaderLeftWidth(rawWidth))
     }
 
     function handlePointerUp() {
+      document.body.classList.remove('is-resizing-video', resizeClassName)
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
@@ -1043,8 +1062,12 @@ function App() {
             </aside>
           </div>
         ) : (
-          <div className="reader-layout">
-            <section className="reader-main" ref={readerMainRef}>
+	          <div
+              ref={readerLayoutRef}
+              className="reader-layout"
+              style={readerLeftWidth ? { gridTemplateColumns: `${readerLeftWidth}px minmax(340px, 1fr)` } : undefined}
+            >
+            <section className="reader-main">
               <header className="reader-main__toolbar">
                 <div className="reader-main__left">
                   <button className="icon-button icon-button--ghost" type="button">
@@ -1078,7 +1101,7 @@ function App() {
               </header>
 
               <div className="reader-scroll">
-                <article className="reader-hero" style={{ width: `${Math.round(videoScale * 100)}%` }}>
+                <article className="reader-hero">
                   <div
                     className={`reader-hero__frame ${selectedVideo.youtubeId ? 'reader-hero__frame--youtube' : ''}`}
                     style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}
@@ -1109,10 +1132,16 @@ function App() {
 	                      <span className="reader-hero__duration">{selectedVideo.durationLabel}</span>
 	                    </div>
                     <button
-                      className="reader-hero__resize"
+                      className="reader-hero__edge reader-hero__edge--right"
                       type="button"
-                      aria-label="Resize video player"
-                      onPointerDown={handleVideoResizeStart}
+                      aria-label="Resize video player horizontally"
+                      onPointerDown={(event) => handleVideoResizeStart('horizontal', event)}
+                    />
+                    <button
+                      className="reader-hero__edge reader-hero__edge--bottom"
+                      type="button"
+                      aria-label="Resize video player vertically"
+                      onPointerDown={(event) => handleVideoResizeStart('vertical', event)}
                     />
 	                  </div>
 	                </article>
