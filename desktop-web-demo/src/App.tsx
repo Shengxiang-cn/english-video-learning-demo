@@ -26,7 +26,7 @@ import {
 } from './mockData'
 
 type Screen = 'library' | 'reader'
-type RightTab = 'info' | 'notebook' | 'chat'
+type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
 type InboxTab = 'inbox' | 'later' | 'archive'
 
 type SavedNote = {
@@ -528,13 +528,19 @@ function App() {
     startTransition(() => {
       setSelectedVideoId(videoId)
       setScreen('reader')
-      setRightTab('chat')
+      setRightTab('subtitle')
       setCurrentPosition(video.lastPositionSec || video.transcript[0]?.startSec || 0)
       setIsPlaying(false)
     })
 
     clearNativeSelection()
     setToast(`Opened ${video.title}`)
+  }
+
+  function returnToLibrary() {
+    setScreen('library')
+    setRightTab('info')
+    clearNativeSelection()
   }
 
   function handleSelectRow(videoId: string) {
@@ -838,7 +844,7 @@ function App() {
     }
 
     setSavedNotes((current) => [note, ...current])
-    setRightTab('notebook')
+    setRightTab('note')
     setShowNoteModal(false)
     clearNativeSelection()
     const savedMessage =
@@ -943,7 +949,7 @@ function App() {
 
       <section className="workspace">
         {screen === 'reader' ? (
-          <button className="reader-menu-button" type="button" onClick={() => setScreen('library')} aria-label="Open navigation">
+          <button className="reader-menu-button" type="button" onClick={returnToLibrary} aria-label="Open navigation">
             <Menu size={18} />
           </button>
         ) : null}
@@ -973,7 +979,7 @@ function App() {
               </div>
             ) : (
               <div className="reader-controls">
-                <button className="icon-button icon-button--ghost" type="button" onClick={() => setScreen('library')}>
+                <button className="icon-button icon-button--ghost" type="button" onClick={returnToLibrary}>
                   <ArrowLeft size={18} />
                 </button>
                 <button className="icon-button icon-button--ghost" type="button">
@@ -1066,7 +1072,7 @@ function App() {
 
             <aside className="right-pane">
               <div className="right-pane__tabs">
-                {(['info', 'notebook', 'chat'] as RightTab[]).map((tab) => (
+                {(['info', 'note', 'chat'] as RightTab[]).map((tab) => (
                   <button
                     key={tab}
                     className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
@@ -1074,7 +1080,7 @@ function App() {
                     onClick={() => setRightTab(tab)}
                   >
                     {tab}
-                    {tab === 'notebook' ? <span>{selectedNotes.length}</span> : null}
+                    {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
                   </button>
                 ))}
               </div>
@@ -1110,7 +1116,7 @@ function App() {
                 </div>
               ) : null}
 
-              {rightTab === 'notebook' ? (
+              {rightTab === 'note' ? (
                 <div className="detail-panel">
                   <section className="meta-section">
                     <p>Notebook</p>
@@ -1276,110 +1282,64 @@ function App() {
                   <div className="reader-scrubber__fill" style={{ width: `${(currentPosition / selectedVideo.durationSec) * 100}%` }} />
                 </div>
 
-                <section className="reader-text">
-	                  <div className="highlight-bar" />
-		                  <div className="transcript-toolbar">
-                    <div className="translation-control">
-                      <div className="translation-control__main">
-                        <label className="translation-picker">
-                          <span>Translate to</span>
-                          <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
-                            {translationLanguages.map((language) => (
-                              <option key={language.value} value={language.value}>
-                                {language.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
-                          {showTranslations ? 'Hide translation' : 'Translate captions'}
-                        </button>
-                        <button className="secondary-button" type="button" onClick={() => void handleTranslateCaptions()} disabled={isTranslating}>
-                          Continue translation
-                        </button>
-                      </div>
-                      <div className="translation-control__status">
-                        <div className="translation-progress" aria-label="Translation progress">
-                          <span
-                            style={{
-                              width: `${translationStatus.total ? Math.round((translationStatus.completed / translationStatus.total) * 100) : 0}%`,
-                            }}
-                          />
-                        </div>
-                        <small>
-                          {isTranslating ? 'Translating' : translationStatus.failed.length ? 'Paused' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
-                          {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
-                        </small>
-                        {translationStatus.failed.length ? (
-                          <button className="text-button" type="button" onClick={() => void handleRetryFailedTranslations()} disabled={isTranslating}>
-                            Retry failed
-                          </button>
-                        ) : null}
-                        {translationStatus.lastError ? <small className="translation-control__error">{translationStatus.lastError}</small> : null}
-                      </div>
-                    </div>
-                    {showSyncPrompt ? (
-                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
-                        Jump to current subtitle
-                      </button>
-                    ) : null}
-                  </div>
-                  <div ref={transcriptContentRef} className="reader-text__content" onScroll={handleTranscriptScroll}>
-                    {showSyncPrompt ? (
-                      <div className="sync-prompt">
-                        <span>Subtitle position is away from the video.</span>
-                        <button type="button" onClick={handleJumpToCurrentSubtitle}>
-                          Jump back
-                        </button>
-                      </div>
-                    ) : null}
-                    {transcript.length === 0 ? (
-                      <article className="empty-card">
-                        <strong>No transcript found</strong>
-                        <p>This YouTube video was imported, but captions were not available from the public transcript endpoint.</p>
-                      </article>
-                    ) : null}
-                    {transcript.map((segment, index) => {
-	                      const isSelected = selectedSegmentIds.includes(segment.id)
-	                      const isActive = activeSegmentIndex === index
-	                      const translationText = translatedSegments[translationKey(selectedVideo.id, translationLanguage, segment.id)]
-
-                      return (
-                        <article
-                          key={segment.id}
-                          className={`reader-line ${isSelected ? 'reader-line--selected' : ''} ${isActive ? 'reader-line--active' : ''}`}
-                          data-segment-id={segment.id}
-                        >
-                          <button className="reader-line__time" type="button" onClick={() => handleSeek(segment.startSec)}>
-                            {formatTime(segment.startSec)}
-                          </button>
-                          <div className="reader-line__body">
-                            <p className="reader-line__text">{segment.text}</p>
-                            {showTranslations && (translationText || isTranslating) ? (
-                              <p className="reader-line__translation">{translationText ?? 'Translating...'}</p>
-                            ) : null}
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
-                </section>
               </div>
             </section>
 
             <aside className="right-pane">
-              <div className="right-pane__tabs">
-                {(['info', 'notebook', 'chat'] as RightTab[]).map((tab) => (
-                  <button
-                    key={tab}
-                    className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
-                    type="button"
-                    onClick={() => setRightTab(tab)}
-                  >
-                    {tab}
-                    {tab === 'notebook' ? <span>{selectedNotes.length}</span> : null}
-                  </button>
-                ))}
+              <div className="right-pane__tabs right-pane__tabs--with-tools">
+                <div className="right-pane__tab-list">
+                  {(['info', 'note', 'chat', 'subtitle'] as RightTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
+                      type="button"
+                      onClick={() => setRightTab(tab)}
+                    >
+                      {tab}
+                      {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
+                    </button>
+                  ))}
+                </div>
+
+                {rightTab === 'subtitle' ? (
+                  <div className="translation-control translation-control--tabs">
+                    <label className="translation-picker">
+                      <span>Translate to</span>
+                      <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
+                        {translationLanguages.map((language) => (
+                          <option key={language.value} value={language.value}>
+                            {language.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
+                      {showTranslations ? 'Hide' : 'Translate'}
+                    </button>
+                    <button className="secondary-button" type="button" onClick={() => void handleTranslateCaptions()} disabled={isTranslating}>
+                      Continue
+                    </button>
+                    <div className="translation-control__status">
+                      <div className="translation-progress" aria-label="Translation progress">
+                        <span
+                          style={{
+                            width: `${translationStatus.total ? Math.round((translationStatus.completed / translationStatus.total) * 100) : 0}%`,
+                          }}
+                        />
+                      </div>
+                      <small>
+                        {isTranslating ? 'Translating' : translationStatus.failed.length ? 'Paused' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
+                        {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
+                      </small>
+                      {translationStatus.failed.length ? (
+                        <button className="text-button" type="button" onClick={() => void handleRetryFailedTranslations()} disabled={isTranslating}>
+                          Retry failed
+                        </button>
+                      ) : null}
+                      {translationStatus.lastError ? <small className="translation-control__error">{translationStatus.lastError}</small> : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               {rightTab === 'info' ? (
@@ -1411,7 +1371,7 @@ function App() {
                 </div>
               ) : null}
 
-              {rightTab === 'notebook' ? (
+              {rightTab === 'note' ? (
                 <div className="detail-panel">
                   <section className="meta-section">
                     <p>Notebook</p>
@@ -1482,6 +1442,58 @@ function App() {
                       <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskAi} disabled={isAsking}>
                         {isAsking ? 'Sending...' : 'Send'}
                       </button>
+                    </div>
+                  </section>
+                </div>
+              ) : null}
+
+              {rightTab === 'subtitle' ? (
+                <div className="detail-panel detail-panel--subtitle">
+                  <section className="reader-text reader-text--side">
+                    <div className="highlight-bar" />
+                    <div ref={transcriptContentRef} className="reader-text__content" onScroll={handleTranscriptScroll}>
+                      {showSyncPrompt ? (
+                        <div className="sync-prompt">
+                          <span>Subtitle position is away from the video.</span>
+                          <button type="button" onClick={handleJumpToCurrentSubtitle}>
+                            Jump back
+                          </button>
+                        </div>
+                      ) : null}
+                      {showSyncPrompt ? (
+                        <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
+                          Jump to current subtitle
+                        </button>
+                      ) : null}
+                      {transcript.length === 0 ? (
+                        <article className="empty-card">
+                          <strong>No transcript found</strong>
+                          <p>This YouTube video was imported, but captions were not available from the public transcript endpoint.</p>
+                        </article>
+                      ) : null}
+                      {transcript.map((segment, index) => {
+                        const isSelected = selectedSegmentIds.includes(segment.id)
+                        const isActive = activeSegmentIndex === index
+                        const translationText = translatedSegments[translationKey(selectedVideo.id, translationLanguage, segment.id)]
+
+                        return (
+                          <article
+                            key={segment.id}
+                            className={`reader-line ${isSelected ? 'reader-line--selected' : ''} ${isActive ? 'reader-line--active' : ''}`}
+                            data-segment-id={segment.id}
+                          >
+                            <button className="reader-line__time" type="button" onClick={() => handleSeek(segment.startSec)}>
+                              {formatTime(segment.startSec)}
+                            </button>
+                            <div className="reader-line__body">
+                              <p className="reader-line__text">{segment.text}</p>
+                              {showTranslations && (translationText || isTranslating) ? (
+                                <p className="reader-line__translation">{translationText ?? 'Translating...'}</p>
+                              ) : null}
+                            </div>
+                          </article>
+                        )
+                      })}
                     </div>
                   </section>
                 </div>
