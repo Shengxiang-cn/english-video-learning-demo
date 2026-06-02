@@ -108,8 +108,40 @@ function normalizeTranscript(items) {
         text: item.text.replace(/\s+/g, ' ').trim(),
       }
     })
+    .flatMap(splitTurnMarkedSegment)
 
   return groupTranscriptLines(rawSegments)
+}
+
+function splitTurnMarkedSegment(segment) {
+  const parts = segment.text.split(/\s*>>\s*/).filter((part) => part.trim())
+  if (parts.length <= 1) {
+    return [
+      {
+        ...segment,
+        startsTurn: /^>>/.test(segment.text),
+        text: segment.text.replace(/^>>\s*/, '').trim(),
+      },
+    ]
+  }
+
+  const totalChars = parts.reduce((sum, part) => sum + part.length, 0)
+  const totalDuration = Math.max(1, segment.endSec - segment.startSec)
+  let elapsed = 0
+
+  return parts.map((part, index) => {
+    const partDuration = Math.max(1, Math.round((part.length / totalChars) * totalDuration))
+    const startSec = segment.startSec + elapsed
+    elapsed += partDuration
+    return {
+      ...segment,
+      id: `${segment.id}-turn-${index + 1}`,
+      startSec,
+      endSec: Math.min(segment.endSec, startSec + partDuration),
+      startsTurn: index > 0 || (index === 0 && /^>>/.test(segment.text)),
+      text: part.trim(),
+    }
+  })
 }
 
 function isSentenceEnd(text) {
@@ -123,11 +155,13 @@ function shouldBreakTranscriptLine(current, next) {
     next.text,
   )
 
-  if (current.text.length >= 180) return true
-  if (wordCount >= 28) return true
+  if (next.startsTurn) return true
+  if (current.text.length >= 320) return true
+  if (wordCount >= 46) return true
   if (gap >= 1.4) return true
   if (gap >= 0.75 && (isSentenceEnd(current.text) || nextStartsFreshThought)) return true
-  if (isSentenceEnd(current.text) && wordCount >= 10 && nextStartsFreshThought) return true
+  if (isSentenceEnd(current.text) && wordCount >= 8) return true
+  if (current.text.length >= 230 && (nextStartsFreshThought || gap >= 0.4)) return true
   return false
 }
 
