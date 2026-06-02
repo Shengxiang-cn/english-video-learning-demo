@@ -273,12 +273,11 @@ function App() {
       return
     }
 
-    function syncSelection() {
+    function readStableSelection() {
       const container = transcriptContentRef.current
       const selection = window.getSelection()
 
       if (!container || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        setTranscriptSelection(null)
         return
       }
 
@@ -286,7 +285,6 @@ function App() {
       const focusNode = selection.focusNode
 
       if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) {
-        setTranscriptSelection(null)
         return
       }
 
@@ -298,9 +296,9 @@ function App() {
         .map((line) => line.trim())
         .filter((line) => Boolean(line) && !/^\d{2}:\d{2}$/.test(line))
         .join('\n')
+        .slice(0, 1200)
 
       if (!quote) {
-        setTranscriptSelection(null)
         return
       }
 
@@ -328,8 +326,36 @@ function App() {
       })
     }
 
-    document.addEventListener('selectionchange', syncSelection)
-    return () => document.removeEventListener('selectionchange', syncSelection)
+    function scheduleSelectionRead() {
+      window.setTimeout(readStableSelection, 80)
+    }
+
+    function clearWhenClickingOutside(event: MouseEvent) {
+      const target = event.target as Node | null
+      if (!target) return
+
+      const transcript = transcriptContentRef.current
+      const actionDock = document.querySelector('.transcript-action-dock')
+      const selectionFloat = document.querySelector('.selection-float')
+
+      if (transcript?.contains(target) || actionDock?.contains(target) || selectionFloat?.contains(target)) {
+        return
+      }
+
+      clearNativeSelection()
+    }
+
+    document.addEventListener('mouseup', scheduleSelectionRead)
+    document.addEventListener('touchend', scheduleSelectionRead)
+    document.addEventListener('keyup', scheduleSelectionRead)
+    document.addEventListener('mousedown', clearWhenClickingOutside)
+
+    return () => {
+      document.removeEventListener('mouseup', scheduleSelectionRead)
+      document.removeEventListener('touchend', scheduleSelectionRead)
+      document.removeEventListener('keyup', scheduleSelectionRead)
+      document.removeEventListener('mousedown', clearWhenClickingOutside)
+    }
   }, [screen, selectedVideo.lastPositionSec, transcript])
 
   function clearNativeSelection() {
@@ -459,42 +485,23 @@ function App() {
     }
   }
 
-  async function handleAskSelectedQuote() {
+  function handleAskSelectedQuote() {
     if (!selectedQuote) {
       setToast('Highlight transcript text first.')
       return
     }
 
-    const question = 'Explain this highlighted passage in plain English, then summarize why it matters.'
-    setChatPrompt(question)
+    setChatPrompt(
+      [
+        'Please analyze this highlighted passage:',
+        '',
+        `"${selectedQuote}"`,
+        '',
+        'Explain it in plain English, then tell me why it matters.',
+      ].join('\n'),
+    )
     setRightTab('chat')
-    setIsAsking(true)
-    setToast('Asking Kimi about the highlighted passage...')
-
-    try {
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          video: selectedVideo,
-          question,
-          quote: selectedQuote,
-        }),
-      })
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'AI request failed.')
-      }
-
-      setAiAnswer(String(data.answer ?? 'No answer returned.'))
-      setToast('Kimi explained the highlight.')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'AI request failed.'
-      setToast(message)
-    } finally {
-      setIsAsking(false)
-    }
+    setToast('Highlight copied into chat. Add your question, then send.')
   }
 
   async function saveNote(source: SavedNote['source']) {
@@ -941,11 +948,8 @@ function App() {
                         <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskSelectedQuote}>
                           {isAsking ? 'Asking...' : 'Ask AI'}
                         </button>
-                        <button className="secondary-button" type="button" onClick={() => setShowNoteModal(true)}>
-                          Add note
-                        </button>
                         <button className="secondary-button" type="button" onClick={() => saveNote('highlight')}>
-                          Save
+                          Add note
                         </button>
                       </div>
                     </div>
@@ -1061,7 +1065,14 @@ function App() {
                   <section className="meta-section">
                     <p>Chat</p>
                     <div className="chat-composer">
-                      <input value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} />
+                      <textarea
+                        value={chatPrompt}
+                        onChange={(event) => setChatPrompt(event.target.value)}
+                        placeholder="Ask about this video, or highlight transcript text and choose Ask AI."
+                      />
+                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskAi} disabled={isAsking}>
+                        {isAsking ? 'Sending...' : 'Send'}
+                      </button>
                     </div>
                   </section>
 
@@ -1080,9 +1091,6 @@ function App() {
                     </blockquote>
                     <p>{chatAnswer}</p>
                     <div className="chat-card__actions">
-                      <button className="secondary-button" type="button" onClick={handleAskAi} disabled={isAsking}>
-                        {isAsking ? 'Asking Kimi...' : 'Ask Kimi'}
-                      </button>
                       <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
                         Save to notebook
                       </button>
@@ -1111,11 +1119,8 @@ function App() {
             >
               {isAsking ? 'Asking...' : 'Ask AI'}
             </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setShowNoteModal(true)}>
-              Add note
-            </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight')}>
-              Save
+              Add note
             </button>
             <button className="selection-float__ghost" type="button" onClick={clearNativeSelection}>
               <X size={16} />

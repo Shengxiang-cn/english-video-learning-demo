@@ -975,10 +975,16 @@
 }
 
 .chat-composer {
+  display: grid;
+  gap: 10px;
   margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #dfe6ef;
+  border-radius: 16px;
+  background: #ffffff;
 }
 
-.chat-composer input,
+.chat-composer textarea,
 .add-modal__header input,
 .note-modal textarea {
   width: 100%;
@@ -989,10 +995,20 @@
   font: inherit;
 }
 
-.chat-composer input:focus,
+.chat-composer textarea {
+  min-height: 138px;
+  line-height: 1.48;
+  resize: vertical;
+}
+
+.chat-composer textarea:focus,
 .add-modal__header input:focus,
 .note-modal textarea:focus {
   outline: none;
+}
+
+.chat-composer .secondary-button {
+  justify-content: center;
 }
 
 .chat-suggestions {
