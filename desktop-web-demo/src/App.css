@@ -939,25 +939,72 @@
 .translation-control--tabs {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-start;
+  gap: 6px;
   min-width: 0;
   width: 100%;
   max-width: none;
   margin-left: 0;
-  padding: 8px 10px;
+  padding: 7px 8px;
   border: 1px solid #dfe6ef;
+  border-radius: 14px;
   background: rgba(250, 252, 255, 0.92);
   box-shadow: none;
 }
 
 .translation-control--tabs .translation-control__status {
-  flex-basis: 100%;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
   justify-content: flex-start;
+  min-width: 0;
+  gap: 6px;
 }
 
 .translation-control--tabs .translation-progress {
-  width: min(180px, 52%);
+  flex: 0 1 76px;
+  width: 76px;
+  min-width: 42px;
+}
+
+.translation-control--tabs .translation-picker {
+  flex: 0 1 128px;
+  min-width: 112px;
+  min-height: 32px;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.translation-control--tabs .translation-picker span,
+.translation-control--tabs .translation-control__status small {
+  font-size: 0.68rem;
+}
+
+.translation-control--tabs .translation-picker select {
+  min-width: 0;
+  font-size: 0.86rem;
+}
+
+.translation-control--tabs .secondary-button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+}
+
+.translation-control--tabs .translation-control__status small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.translation-control--tabs .text-button,
+.translation-control--tabs .translation-control__error {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .translation-control__main,
