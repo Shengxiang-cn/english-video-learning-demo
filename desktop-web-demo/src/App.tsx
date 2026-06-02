@@ -889,7 +889,6 @@ function App() {
                             {formatTime(segment.startSec)}
                           </button>
                           <div className="reader-line__body">
-                            <span className={`speaker-pill speaker-pill--${segment.speaker}`}>{segment.speaker}:</span>
                             <p className="reader-line__text">{segment.text}</p>
                           </div>
                         </article>

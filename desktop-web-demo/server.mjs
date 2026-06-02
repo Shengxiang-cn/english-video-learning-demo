@@ -95,20 +95,72 @@ function formatDuration(seconds) {
 }
 
 function normalizeTranscript(items) {
-  return items
+  const rawSegments = items
     .filter((item) => item.text?.trim())
     .map((item, index) => {
       const hasOffsetMs = item.offset !== undefined
       const startSec = Math.round(hasOffsetMs ? Number(item.offset) / 1000 : Number(item.start))
       const durationSec = Math.max(2, Math.round(hasOffsetMs ? Number(item.duration) / 1000 : Number(item.duration)))
       return {
-        id: `yt-${index + 1}`,
+        id: `raw-${index + 1}`,
         startSec,
         endSec: startSec + durationSec,
-        speaker: index % 2 === 0 ? 'speaker1' : 'speaker2',
         text: item.text.replace(/\s+/g, ' ').trim(),
       }
     })
+
+  return groupTranscriptLines(rawSegments)
+}
+
+function isSentenceEnd(text) {
+  return /[.!?]["')\]]?$/.test(text.trim())
+}
+
+function shouldBreakTranscriptLine(current, next) {
+  const gap = next.startSec - current.endSec
+  const wordCount = current.text.split(/\s+/).filter(Boolean).length
+  const nextStartsFreshThought = /^(and|but|so|then|now|because|i|we|you|they|this|that|there|here|when|what|how|why)\b/i.test(
+    next.text,
+  )
+
+  if (current.text.length >= 180) return true
+  if (wordCount >= 28) return true
+  if (gap >= 1.4) return true
+  if (gap >= 0.75 && (isSentenceEnd(current.text) || nextStartsFreshThought)) return true
+  if (isSentenceEnd(current.text) && wordCount >= 10 && nextStartsFreshThought) return true
+  return false
+}
+
+function groupTranscriptLines(segments) {
+  const lines = []
+  let current = null
+
+  for (const segment of segments) {
+    if (!current) {
+      current = { ...segment }
+      continue
+    }
+
+    if (shouldBreakTranscriptLine(current, segment)) {
+      lines.push(current)
+      current = { ...segment }
+    } else {
+      current = {
+        ...current,
+        endSec: Math.max(current.endSec, segment.endSec),
+        text: `${current.text} ${segment.text}`.replace(/\s+/g, ' ').trim(),
+      }
+    }
+  }
+
+  if (current) lines.push(current)
+
+  return lines.map((line, index) => ({
+    id: `yt-${index + 1}`,
+    startSec: line.startSec,
+    endSec: line.endSec,
+    text: line.text,
+  }))
 }
 
 function transcriptContext(video) {

@@ -769,29 +769,9 @@
 }
 
 .reader-line__body::selection,
-.reader-line__text::selection,
-.speaker-pill::selection {
+.reader-line__text::selection {
   background: rgba(255, 227, 111, 0.9);
   color: #2b2b25;
-}
-
-.speaker-pill {
-  display: inline;
-  margin-right: 8px;
-  font-family: 'SF Pro Text', 'Segoe UI', sans-serif;
-  font-size: 0.9rem;
-  font-weight: 700;
-  text-transform: lowercase;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.speaker-pill--speaker1 {
-  color: #bd5b42;
-}
-
-.speaker-pill--speaker2 {
-  color: #4a6da8;
 }
 
 .reader-line__text {
