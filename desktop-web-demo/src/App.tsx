@@ -9,7 +9,6 @@ import {
   FileText,
   Globe,
   Home as HomeIcon,
-  Menu,
   Network,
   Plus,
   Search,
@@ -1436,12 +1435,6 @@ function App() {
       </aside>
 
       <section className="workspace">
-        {screen === 'reader' ? (
-          <button className="reader-menu-button" type="button" onClick={returnToLibrary} aria-label="Open navigation">
-            <Menu size={18} />
-          </button>
-        ) : null}
-
         {screen === 'library' ? (
         <header className="workspace__topbar">
           <div className="workspace__group">

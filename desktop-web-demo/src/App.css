@@ -22,24 +22,6 @@
   display: none;
 }
 
-.reader-menu-button {
-  position: fixed;
-  top: 16px;
-  left: 16px;
-  z-index: 20;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(214, 222, 233, 0.86);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #263141;
-  box-shadow: 0 12px 26px rgba(24, 31, 40, 0.12);
-  backdrop-filter: blur(12px);
-}
-
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -655,7 +637,6 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding-left: 42px;
 }
 
 .study-player-card__header h2,
