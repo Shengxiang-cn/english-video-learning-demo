@@ -1304,7 +1304,7 @@ function App() {
                 {rightTab === 'subtitle' ? (
                   <div className="translation-control translation-control--tabs">
                     <label className="translation-picker">
-                      <span>Translate to</span>
+                      <span>To</span>
                       <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
                         {translationLanguages.map((language) => (
                           <option key={language.value} value={language.value}>
@@ -1328,7 +1328,7 @@ function App() {
                         />
                       </div>
                       <small>
-                        {isTranslating ? 'Translating' : translationStatus.failed.length ? 'Paused' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
+                        {translationStatus.completed}/{translationStatus.total || transcript.length}
                         {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
                       </small>
                       {translationStatus.failed.length ? (

@@ -941,12 +941,12 @@
   align-items: center;
   flex-wrap: nowrap;
   justify-content: flex-start;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   width: 100%;
   max-width: none;
   margin-left: 0;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border: 1px solid #dfe6ef;
   border-radius: 14px;
   background: rgba(250, 252, 255, 0.92);
@@ -958,39 +958,39 @@
   flex-wrap: nowrap;
   justify-content: flex-start;
   min-width: 0;
-  gap: 6px;
+  gap: 5px;
 }
 
 .translation-control--tabs .translation-progress {
-  flex: 0 1 76px;
-  width: 76px;
-  min-width: 42px;
+  flex: 0 1 54px;
+  width: 54px;
+  min-width: 34px;
 }
 
 .translation-control--tabs .translation-picker {
-  flex: 0 1 128px;
-  min-width: 112px;
-  min-height: 32px;
-  gap: 6px;
-  padding: 0 8px;
+  flex: 0 1 92px;
+  min-width: 76px;
+  min-height: 28px;
+  gap: 4px;
+  padding: 0 6px;
 }
 
 .translation-control--tabs .translation-picker span,
 .translation-control--tabs .translation-control__status small {
-  font-size: 0.68rem;
+  font-size: 0.58rem;
 }
 
 .translation-control--tabs .translation-picker select {
   min-width: 0;
-  font-size: 0.86rem;
+  font-size: 0.72rem;
 }
 
 .translation-control--tabs .secondary-button {
   flex: 0 0 auto;
-  min-height: 32px;
-  padding: 0 9px;
-  border-radius: 10px;
-  font-size: 0.82rem;
+  min-height: 28px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 0.7rem;
 }
 
 .translation-control--tabs .translation-control__status small {
