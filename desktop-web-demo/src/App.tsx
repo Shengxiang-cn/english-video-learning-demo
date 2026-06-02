@@ -7,6 +7,7 @@ import {
   FileText,
   Globe,
   Inbox,
+  Menu,
   MoreHorizontal,
   NotebookPen,
   Plus,
@@ -221,6 +222,33 @@ function App() {
   }, [selectedVideoId, selectedQuote])
 
   useEffect(() => {
+    function syncYoutubeProgress(event: MessageEvent) {
+      if (typeof event.data !== 'string') return
+
+      try {
+        const payload = JSON.parse(event.data)
+        const info = payload?.info
+        if (payload?.event !== 'infoDelivery' || !info) return
+
+        if (typeof info.currentTime === 'number') {
+          setCurrentPosition(info.currentTime)
+        }
+
+        if (info.playerState === 1) {
+          setIsPlaying(true)
+        } else if (info.playerState === 0 || info.playerState === 2) {
+          setIsPlaying(false)
+        }
+      } catch {
+        // Ignore non-YouTube postMessage payloads.
+      }
+    }
+
+    window.addEventListener('message', syncYoutubeProgress)
+    return () => window.removeEventListener('message', syncYoutubeProgress)
+  }, [])
+
+  useEffect(() => {
     if (!toast) {
       return
     }
@@ -322,7 +350,7 @@ function App() {
     startTransition(() => {
       setSelectedVideoId(videoId)
       setScreen('reader')
-      setRightTab('info')
+      setRightTab('chat')
       setCurrentPosition(video.lastPositionSec || video.transcript[0]?.startSec || 0)
       setIsPlaying(false)
     })
@@ -345,16 +373,6 @@ function App() {
       sendYoutubeCommand('playVideo')
       setIsPlaying(true)
     }
-  }
-
-  function togglePlayback() {
-    setIsPlaying((playing) => {
-      const next = !playing
-      if (selectedVideo.youtubeId) {
-        sendYoutubeCommand(next ? 'playVideo' : 'pauseVideo')
-      }
-      return next
-    })
   }
 
   async function handleImportUrl() {
@@ -514,7 +532,7 @@ function App() {
   }
 
   return (
-    <main className="desktop-app">
+    <main className={`desktop-app ${screen === 'reader' ? 'desktop-app--reader' : ''}`}>
       <aside className="sidebar">
         <div className="sidebar__brand">
           <h1>Reader</h1>
@@ -560,6 +578,12 @@ function App() {
       </aside>
 
       <section className="workspace">
+        {screen === 'reader' ? (
+          <button className="reader-menu-button" type="button" onClick={() => setScreen('library')} aria-label="Open navigation">
+            <Menu size={18} />
+          </button>
+        ) : null}
+
         <header className="workspace__topbar">
           <div className="workspace__group">
             <div className="library-title">
@@ -847,10 +871,6 @@ function App() {
                       />
                     ) : null}
                     <div className="reader-hero__scrim" />
-
-                    <button className="play-button play-button--center" type="button" onClick={togglePlayback}>
-                      {isPlaying ? 'Pause' : 'Play'}
-                    </button>
 
                     <div className="reader-hero__footer">
                       <div>

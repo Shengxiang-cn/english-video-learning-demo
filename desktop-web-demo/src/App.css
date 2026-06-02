@@ -7,6 +7,38 @@
   color: #28313d;
 }
 
+.desktop-app--reader {
+  grid-template-columns: 1fr;
+  height: 100vh;
+  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.desktop-app--reader .sidebar,
+.desktop-app--reader .workspace__topbar,
+.desktop-app--reader .reader-main__toolbar {
+  display: none;
+}
+
+.reader-menu-button {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(214, 222, 233, 0.86);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #263141;
+  box-shadow: 0 12px 26px rgba(24, 31, 40, 0.12);
+  backdrop-filter: blur(12px);
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -559,6 +591,30 @@
   flex-direction: column;
 }
 
+.desktop-app--reader .workspace,
+.desktop-app--reader .reader-layout,
+.desktop-app--reader .reader-main {
+  min-height: 0;
+  height: 100vh;
+}
+
+.desktop-app--reader .reader-layout {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  min-height: 0;
+  width: 100vw;
+}
+
+.desktop-app--reader .right-pane {
+  height: 100vh;
+  overflow: auto;
+}
+
+.desktop-app--reader .right-pane__tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .reader-main__toolbar {
   display: flex;
   justify-content: space-between;
@@ -574,10 +630,26 @@
   padding: 18px 24px 44px;
 }
 
+.desktop-app--reader .reader-scroll {
+  display: grid;
+  grid-template-rows: minmax(0, 56vh) 6px minmax(0, 1fr);
+  gap: 12px;
+  height: 100vh;
+  overflow: hidden;
+  padding: 0;
+  background: #fff;
+}
+
 .reader-hero {
   position: relative;
   margin: 0 auto;
   width: min(100%, 980px);
+}
+
+.desktop-app--reader .reader-hero {
+  width: 100%;
+  height: 100%;
+  margin: 0;
 }
 
 .reader-hero__frame {
@@ -586,6 +658,14 @@
   aspect-ratio: 16 / 9;
   border-radius: 24px;
   box-shadow: 0 22px 60px rgba(24, 30, 39, 0.12);
+}
+
+.desktop-app--reader .reader-hero__frame {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .reader-hero__image,
@@ -620,6 +700,11 @@
 .reader-hero__frame--youtube .reader-hero__scrim {
   background:
     linear-gradient(180deg, rgba(17, 19, 23, 0.04) 0%, rgba(17, 19, 23, 0) 46%, rgba(17, 19, 23, 0.46) 100%);
+}
+
+.desktop-app--reader .reader-hero__scrim,
+.desktop-app--reader .reader-hero__footer {
+  display: none;
 }
 
 .reader-hero__footer,
@@ -702,6 +787,12 @@
   background: #e2e7ed;
 }
 
+.desktop-app--reader .reader-scrubber {
+  width: min(320px, 42vw);
+  margin: 0 auto;
+  align-self: center;
+}
+
 .reader-scrubber__fill {
   height: 100%;
   border-radius: inherit;
@@ -715,16 +806,37 @@
   align-items: start;
 }
 
+.desktop-app--reader .reader-text {
+  min-height: 0;
+  height: 100%;
+  grid-template-columns: 4px minmax(0, 1fr);
+  gap: 22px;
+  padding: 0 34px 30px;
+  overflow: hidden;
+}
+
 .highlight-bar {
   min-height: 100%;
   border-radius: 999px;
   background: #69a9ff;
 }
 
+.desktop-app--reader .highlight-bar {
+  background: #dde6f2;
+}
+
 .reader-text__content {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.desktop-app--reader .reader-text__content {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 16px;
+  scroll-behavior: smooth;
 }
 
 .reader-line {
@@ -735,6 +847,10 @@
   padding: 8px 0;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.desktop-app--reader .reader-line {
+  opacity: 0.36;
 }
 
 .reader-line__time {
@@ -749,6 +865,10 @@
   -webkit-user-select: none;
 }
 
+.desktop-app--reader .reader-line__time {
+  color: #a2acba;
+}
+
 .reader-line__body {
   display: inline;
   font-family: Georgia, 'Times New Roman', serif;
@@ -757,8 +877,28 @@
   color: #334054;
 }
 
+.desktop-app--reader .reader-line__body {
+  color: #8c96a5;
+  font-size: 1.06rem;
+  line-height: 1.58;
+}
+
 .reader-line--active .reader-line__time {
   color: #1f6bdf;
+}
+
+.desktop-app--reader .reader-line--active {
+  opacity: 1;
+}
+
+.desktop-app--reader .reader-line--active .reader-line__body {
+  color: #121a27;
+  font-weight: 700;
+}
+
+.desktop-app--reader .reader-line--active .reader-line__time {
+  color: #1f6bdf;
+  font-weight: 700;
 }
 
 .reader-line--selected {

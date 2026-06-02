@@ -52,6 +52,10 @@ main {
   padding: 28px;
 }
 
+main.desktop-app--reader {
+  padding: 0;
+}
+
 @media (max-width: 520px) {
   main {
     padding: 0;
