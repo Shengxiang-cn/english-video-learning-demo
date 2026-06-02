@@ -221,7 +221,11 @@ function App() {
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
   const readerLayoutRef = useRef<HTMLDivElement | null>(null)
   const autoScrollResetRef = useRef<number | null>(null)
+  const manualScrollResetRef = useRef<number | null>(null)
+  const syncPromptDelayRef = useRef<number | null>(null)
   const isAutoScrollingRef = useRef(false)
+  const isManualTranscriptBrowsingRef = useRef(false)
+  const detachedAtSegmentIndexRef = useRef<number | null>(null)
 
   const selectedVideo = findVideoById(videos, selectedVideoId)
   const transcript = selectedVideo.transcript
@@ -304,13 +308,28 @@ function App() {
     if (screen !== 'reader' || activeSegmentIndex < 0) return
 
     if (isTranscriptFollowing) {
-      scrollActiveTranscriptLine('smooth')
+      scrollActiveTranscriptLine()
       return
     }
 
-    if (isPlaying && !isActiveTranscriptLineVisible()) {
-      setShowSyncPrompt(true)
+    if (
+      isPlaying &&
+      !isManualTranscriptBrowsingRef.current &&
+      !isActiveTranscriptLineVisible('loose') &&
+      detachedAtSegmentIndexRef.current !== null &&
+      activeSegmentIndex - detachedAtSegmentIndexRef.current >= 2
+    ) {
+      if (syncPromptDelayRef.current) {
+        window.clearTimeout(syncPromptDelayRef.current)
+      }
+      syncPromptDelayRef.current = window.setTimeout(() => {
+        if (isPlaying && !isTranscriptFollowing && !isManualTranscriptBrowsingRef.current && !isActiveTranscriptLineVisible('loose')) {
+          setShowSyncPrompt(true)
+        }
+      }, 900)
     }
+  // The scroll helpers intentionally read live refs; adding them here would retrigger follow-scroll on unrelated renders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSegmentIndex, isPlaying, isTranscriptFollowing, screen])
 
   useEffect(() => {
@@ -318,6 +337,20 @@ function App() {
       setShowSyncPrompt(false)
     }
   }, [isPlaying])
+
+  useEffect(() => {
+    return () => {
+      if (autoScrollResetRef.current) {
+        window.clearTimeout(autoScrollResetRef.current)
+      }
+      if (manualScrollResetRef.current) {
+        window.clearTimeout(manualScrollResetRef.current)
+      }
+      if (syncPromptDelayRef.current) {
+        window.clearTimeout(syncPromptDelayRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     setAiAnswer('')
@@ -475,37 +508,82 @@ function App() {
     setTranscriptSelection(null)
   }
 
-  function isActiveTranscriptLineVisible() {
+  function isActiveTranscriptLineVisible(mode: 'strict' | 'loose' = 'strict') {
     const container = transcriptContentRef.current
     const activeLine = container?.querySelector('.reader-line--active')
     if (!container || !activeLine) return true
 
     const containerRect = container.getBoundingClientRect()
     const lineRect = activeLine.getBoundingClientRect()
-    return lineRect.top >= containerRect.top + 24 && lineRect.bottom <= containerRect.bottom - 24
+    const inset = mode === 'loose' ? -120 : 24
+    return lineRect.top >= containerRect.top + inset && lineRect.bottom <= containerRect.bottom - inset
   }
 
-  function scrollActiveTranscriptLine(behavior: ScrollBehavior = 'smooth') {
-    const activeLine = transcriptContentRef.current?.querySelector('.reader-line--active')
-    if (!activeLine) return
+  function shouldAutoScrollActiveLine() {
+    const container = transcriptContentRef.current
+    const activeLine = container?.querySelector('.reader-line--active')
+    if (!container || !activeLine) return false
+
+    const containerRect = container.getBoundingClientRect()
+    const lineRect = activeLine.getBoundingClientRect()
+    const lineCenter = lineRect.top + lineRect.height / 2
+    const upperComfortLine = containerRect.top + containerRect.height * 0.34
+    const lowerComfortLine = containerRect.top + containerRect.height * 0.62
+
+    return lineCenter < upperComfortLine || lineCenter > lowerComfortLine
+  }
+
+  function scrollActiveTranscriptLine() {
+    const container = transcriptContentRef.current
+    const activeLine = container?.querySelector('.reader-line--active')
+    if (!container || !activeLine || !shouldAutoScrollActiveLine()) return
 
     isAutoScrollingRef.current = true
-    activeLine.scrollIntoView({ block: 'center', behavior })
     setShowSyncPrompt(false)
+    detachedAtSegmentIndexRef.current = null
+
+    const containerRect = container.getBoundingClientRect()
+    const lineRect = activeLine.getBoundingClientRect()
+    const lineCenter = lineRect.top + lineRect.height / 2
+    const targetCenter = containerRect.top + containerRect.height * 0.45
+    const delta = lineCenter - targetCenter
+
+    if (Math.abs(delta) > 18) {
+      container.scrollTo({
+        top: container.scrollTop + delta,
+        behavior: 'smooth',
+      })
+    }
 
     if (autoScrollResetRef.current) {
       window.clearTimeout(autoScrollResetRef.current)
     }
     autoScrollResetRef.current = window.setTimeout(() => {
       isAutoScrollingRef.current = false
-    }, 420)
+    }, 720)
   }
 
   function handleTranscriptScroll() {
     if (isAutoScrollingRef.current || screen !== 'reader' || activeSegmentIndex < 0) return
 
-    const isVisible = isActiveTranscriptLineVisible()
-    setIsTranscriptFollowing(isVisible)
+    isManualTranscriptBrowsingRef.current = true
+    setShowSyncPrompt(false)
+
+    if (manualScrollResetRef.current) {
+      window.clearTimeout(manualScrollResetRef.current)
+    }
+    manualScrollResetRef.current = window.setTimeout(() => {
+      isManualTranscriptBrowsingRef.current = false
+    }, 1800)
+
+    const isVisible = isActiveTranscriptLineVisible('loose')
+    const shouldFollow = isVisible && shouldAutoScrollActiveLine() === false
+    setIsTranscriptFollowing(shouldFollow)
+
+    if (!shouldFollow && detachedAtSegmentIndexRef.current === null) {
+      detachedAtSegmentIndexRef.current = activeSegmentIndex
+    }
+
     if (!isPlaying || isVisible) {
       setShowSyncPrompt(false)
     }
@@ -529,6 +607,9 @@ function App() {
       setSelectedVideoId(videoId)
       setScreen('reader')
       setRightTab('subtitle')
+      setIsTranscriptFollowing(true)
+      setShowSyncPrompt(false)
+      detachedAtSegmentIndexRef.current = null
       setCurrentPosition(video.lastPositionSec || video.transcript[0]?.startSec || 0)
       setIsPlaying(false)
     })
@@ -803,7 +884,9 @@ function App() {
   function handleJumpToCurrentSubtitle() {
     setIsTranscriptFollowing(true)
     setShowSyncPrompt(false)
-    scrollActiveTranscriptLine('smooth')
+    detachedAtSegmentIndexRef.current = null
+    isManualTranscriptBrowsingRef.current = false
+    scrollActiveTranscriptLine()
   }
 
   function handleTranslationLanguageChange(language: string) {
