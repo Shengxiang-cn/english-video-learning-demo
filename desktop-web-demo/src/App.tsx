@@ -53,6 +53,19 @@ type TranscriptSelection = {
   y: number
 }
 
+type TranslationBatch = {
+  id: string
+  language: string
+  segments: DemoVideo['transcript']
+}
+
+type TranslationStatus = {
+  total: number
+  completed: number
+  failed: TranslationBatch[]
+  lastError: string
+}
+
 const sidebarCollections = [
   { label: 'Videos', icon: Video },
   { label: 'Tags', icon: Tag },
@@ -187,7 +200,12 @@ function App() {
   const [showTranslations, setShowTranslations] = useState(false)
   const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
-  const [translationProgress, setTranslationProgress] = useState('')
+  const [translationStatus, setTranslationStatus] = useState<TranslationStatus>({
+    total: 0,
+    completed: 0,
+    failed: [],
+    lastError: '',
+  })
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
@@ -655,6 +673,74 @@ function App() {
     }
   }
 
+  async function translateBatch(batch: TranslationBatch) {
+    const numberedLines = batch.segments.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
+    const response = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video: selectedVideo,
+        question:
+          `Translate every numbered transcript line into natural ${batch.language}. Keep the original numbering and return exactly ${batch.segments.length} lines. Do not summarize, merge, explain, or add extra text.`,
+        quote: numberedLines,
+      }),
+    })
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data?.error ?? 'Translation failed.')
+    }
+
+    const translatedLines = parseNumberedTranslations(String(data.answer ?? ''), batch.segments.length)
+
+    setTranslatedSegments((current) => {
+      const next = { ...current }
+      batch.segments.forEach((segment, index) => {
+        next[translationKey(selectedVideo.id, batch.language, segment.id)] =
+          translatedLines[index] || 'Translation unavailable.'
+      })
+      return next
+    })
+  }
+
+  async function runTranslationBatches(batches: TranslationBatch[], totalSegments: number, completedOffset = 0) {
+    if (batches.length === 0) {
+      return
+    }
+
+    setIsTranslating(true)
+    setTranslationStatus({
+      total: totalSegments,
+      completed: completedOffset,
+      failed: [],
+      lastError: '',
+    })
+
+    let completed = completedOffset
+    const failed: TranslationBatch[] = []
+    let lastError = ''
+
+    for (const batch of batches) {
+      try {
+        await translateBatch(batch)
+        completed += batch.segments.length
+      } catch (error) {
+        failed.push(batch)
+        lastError = error instanceof Error ? error.message : 'Translation failed.'
+      }
+
+      setTranslationStatus({
+        total: totalSegments,
+        completed: Math.min(completed, totalSegments),
+        failed,
+        lastError,
+      })
+    }
+
+    setIsTranslating(false)
+    setToast(failed.length ? `${failed.length} translation batch failed. Retry from the control bar.` : `${batches[0].language} captions are ready.`)
+  }
+
   async function handleTranslateCaptions(language = translationLanguage) {
     setShowTranslations(true)
 
@@ -667,63 +753,36 @@ function App() {
     )
 
     if (segmentsToTranslate.length === 0) {
+      setTranslationStatus({
+        total: transcript.length,
+        completed: transcript.length,
+        failed: [],
+        lastError: '',
+      })
       setToast(`${language} captions are already translated.`)
       return
     }
 
-    const batchSize = 14
-    const batches = Array.from({ length: Math.ceil(segmentsToTranslate.length / batchSize) }, (_, index) =>
-      segmentsToTranslate.slice(index * batchSize, index * batchSize + batchSize),
-    )
+    const batchSize = 8
+    const batches = Array.from({ length: Math.ceil(segmentsToTranslate.length / batchSize) }, (_, index) => ({
+      id: `${selectedVideo.id}:${language}:${index}`,
+      language,
+      segments: segmentsToTranslate.slice(index * batchSize, index * batchSize + batchSize),
+    }))
 
-    setIsTranslating(true)
-    setTranslationProgress(`0/${segmentsToTranslate.length}`)
     setToast(`Translating full transcript to ${language}...`)
+    await runTranslationBatches(batches, transcript.length, transcript.length - segmentsToTranslate.length)
+  }
 
-    try {
-      let translatedCount = 0
-
-      for (const batch of batches) {
-        const numberedLines = batch.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
-        const response = await fetch('/api/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            video: selectedVideo,
-            question:
-              `Translate every numbered transcript line into natural ${language}. Keep the original numbering and return exactly ${batch.length} lines. Do not summarize, merge, explain, or add extra text.`,
-            quote: numberedLines,
-          }),
-        })
-        const data = await response.json()
-
-        if (!response.ok) {
-          throw new Error(data?.error ?? 'Translation failed.')
-        }
-
-        const translatedLines = parseNumberedTranslations(String(data.answer ?? ''), batch.length)
-
-        setTranslatedSegments((current) => {
-          const next = { ...current }
-          batch.forEach((segment, index) => {
-            next[translationKey(selectedVideo.id, language, segment.id)] =
-              translatedLines[index] || 'Translation unavailable.'
-          })
-          return next
-        })
-
-        translatedCount += batch.length
-        setTranslationProgress(`${Math.min(translatedCount, segmentsToTranslate.length)}/${segmentsToTranslate.length}`)
-      }
-
-      setToast(`${language} captions are ready.`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Translation failed.'
-      setToast(message)
-    } finally {
-      setIsTranslating(false)
-      setTranslationProgress('')
+  async function handleRetryFailedTranslations() {
+    if (translationStatus.failed.length === 0) {
+      await handleTranslateCaptions()
+      return
     }
+
+    const failedBatches = translationStatus.failed
+    setToast('Retrying failed translation batches...')
+    await runTranslationBatches(failedBatches, translationStatus.total || transcript.length, translationStatus.completed)
   }
 
   function handleJumpToCurrentSubtitle() {
@@ -1210,21 +1269,46 @@ function App() {
 
                 <section className="reader-text">
 	                  <div className="highlight-bar" />
-	                  <div className="transcript-toolbar">
-                    <label className="translation-picker">
-                      <span>Translate to</span>
-                      <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
-                        {translationLanguages.map((language) => (
-                          <option key={language.value} value={language.value}>
-                            {language.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-	                    <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
-	                      {showTranslations ? 'Hide translation' : 'Translate captions'}
-	                    </button>
-                    {isTranslating ? <span>Translating {translationProgress}</span> : null}
+		                  <div className="transcript-toolbar">
+                    <div className="translation-control">
+                      <div className="translation-control__main">
+                        <label className="translation-picker">
+                          <span>Translate to</span>
+                          <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
+                            {translationLanguages.map((language) => (
+                              <option key={language.value} value={language.value}>
+                                {language.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
+                          {showTranslations ? 'Hide translation' : 'Translate captions'}
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => void handleTranslateCaptions()} disabled={isTranslating}>
+                          Continue translation
+                        </button>
+                      </div>
+                      <div className="translation-control__status">
+                        <div className="translation-progress" aria-label="Translation progress">
+                          <span
+                            style={{
+                              width: `${translationStatus.total ? Math.round((translationStatus.completed / translationStatus.total) * 100) : 0}%`,
+                            }}
+                          />
+                        </div>
+                        <small>
+                          {isTranslating ? 'Translating' : 'Translation'} {translationStatus.completed}/{translationStatus.total || transcript.length}
+                          {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
+                        </small>
+                        {translationStatus.failed.length ? (
+                          <button className="text-button" type="button" onClick={() => void handleRetryFailedTranslations()} disabled={isTranslating}>
+                            Retry failed
+                          </button>
+                        ) : null}
+                        {translationStatus.lastError ? <small className="translation-control__error">{translationStatus.lastError}</small> : null}
+                      </div>
+                    </div>
                     {showSyncPrompt ? (
                       <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
                         Jump to current subtitle

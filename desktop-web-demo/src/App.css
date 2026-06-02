@@ -910,6 +910,70 @@
   font-size: 0.8rem;
 }
 
+.translation-control {
+  display: grid;
+  gap: 8px;
+  min-width: min(760px, 100%);
+  padding: 10px;
+  border: 1px solid #dfe6ef;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(24, 31, 40, 0.06);
+}
+
+.translation-control__main,
+.translation-control__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.translation-control__status {
+  gap: 10px;
+  color: #68778c;
+}
+
+.translation-control__status small {
+  font-size: 0.8rem;
+}
+
+.translation-control__error {
+  color: #b74f4f !important;
+}
+
+.translation-progress {
+  position: relative;
+  width: min(220px, 38vw);
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5ebf3;
+}
+
+.translation-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: #69a9ff;
+  transition: width 180ms ease;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: #1f6bdf;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.text-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .translation-picker {
   display: inline-flex;
   align-items: center;
