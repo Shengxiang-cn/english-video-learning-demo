@@ -632,7 +632,7 @@
 
 .desktop-app--reader .reader-scroll {
   display: grid;
-  grid-template-rows: minmax(0, 56vh) 6px minmax(0, 1fr);
+  grid-template-rows: auto 6px minmax(240px, 1fr);
   gap: 12px;
   height: 100vh;
   overflow: hidden;
@@ -648,7 +648,6 @@
 
 .desktop-app--reader .reader-hero {
   width: 100%;
-  height: 100%;
   margin: 0;
 }
 
@@ -661,9 +660,10 @@
 }
 
 .desktop-app--reader .reader-hero__frame {
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
+  width: min(100%, calc(56vh * 16 / 9));
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
   border-radius: 0;
   box-shadow: none;
 }
@@ -810,6 +810,7 @@
   min-height: 0;
   height: 100%;
   grid-template-columns: 4px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 22px;
   padding: 0 34px 30px;
   overflow: hidden;
@@ -822,7 +823,46 @@
 }
 
 .desktop-app--reader .highlight-bar {
+  grid-row: 1 / -1;
   background: #dde6f2;
+}
+
+.transcript-action-dock {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: grid;
+  grid-column: 2;
+  gap: 10px;
+  margin-bottom: 2px;
+  padding: 12px 14px;
+  border: 1px solid #dce4ee;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 34px rgba(28, 37, 48, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.transcript-action-dock span {
+  color: #1f6bdf;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.transcript-action-dock p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #293344;
+  line-height: 1.45;
+}
+
+.transcript-action-dock div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .reader-text__content {
@@ -832,6 +872,8 @@
 }
 
 .desktop-app--reader .reader-text__content {
+  grid-column: 2;
+  grid-row: 2;
   min-height: 0;
   max-height: 100%;
   overflow-y: auto;

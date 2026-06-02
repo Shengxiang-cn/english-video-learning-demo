@@ -218,6 +218,13 @@ function App() {
   }, [isPlaying, screen, transcript])
 
   useEffect(() => {
+    if (screen !== 'reader' || activeSegmentIndex < 0) return
+
+    const activeLine = transcriptContentRef.current?.querySelector('.reader-line--active')
+    activeLine?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [activeSegmentIndex, screen])
+
+  useEffect(() => {
     setAiAnswer('')
   }, [selectedVideoId, selectedQuote])
 
@@ -444,6 +451,44 @@ function App() {
 
       setAiAnswer(String(data.answer ?? 'No answer returned.'))
       setToast('Kimi answer is ready.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI request failed.'
+      setToast(message)
+    } finally {
+      setIsAsking(false)
+    }
+  }
+
+  async function handleAskSelectedQuote() {
+    if (!selectedQuote) {
+      setToast('Highlight transcript text first.')
+      return
+    }
+
+    const question = 'Explain this highlighted passage in plain English, then summarize why it matters.'
+    setChatPrompt(question)
+    setRightTab('chat')
+    setIsAsking(true)
+    setToast('Asking Kimi about the highlighted passage...')
+
+    try {
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video: selectedVideo,
+          question,
+          quote: selectedQuote,
+        }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? 'AI request failed.')
+      }
+
+      setAiAnswer(String(data.answer ?? 'No answer returned.'))
+      setToast('Kimi explained the highlight.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI request failed.'
       setToast(message)
@@ -888,6 +933,23 @@ function App() {
 
                 <section className="reader-text">
                   <div className="highlight-bar" />
+                  {transcriptSelection ? (
+                    <div className="transcript-action-dock" onMouseDown={(event) => event.preventDefault()}>
+                      <span>{selectedTimestamp}</span>
+                      <p>{selectedQuote}</p>
+                      <div>
+                        <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskSelectedQuote}>
+                          {isAsking ? 'Asking...' : 'Ask AI'}
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => setShowNoteModal(true)}>
+                          Add note
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => saveNote('highlight')}>
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <div ref={transcriptContentRef} className="reader-text__content">
                     {transcript.length === 0 ? (
                       <article className="empty-card">
@@ -1044,17 +1106,15 @@ function App() {
           >
             <button
               type="button"
-              onClick={() => {
-                setRightTab('chat')
-                setToast('AI pane pinned to your highlight.')
-              }}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={handleAskSelectedQuote}
             >
-              Ask AI
+              {isAsking ? 'Asking...' : 'Ask AI'}
             </button>
-            <button type="button" onClick={() => setShowNoteModal(true)}>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => setShowNoteModal(true)}>
               Add note
             </button>
-            <button type="button" onClick={() => saveNote('highlight')}>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight')}>
               Save
             </button>
             <button className="selection-float__ghost" type="button" onClick={clearNativeSelection}>

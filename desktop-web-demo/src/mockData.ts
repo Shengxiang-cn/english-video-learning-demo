@@ -2,7 +2,7 @@ export type TranscriptSegment = {
   id: string
   startSec: number
   endSec: number
-  speaker: 'speaker1' | 'speaker2'
+  speaker?: 'speaker1' | 'speaker2'
   text: string
 }
 
