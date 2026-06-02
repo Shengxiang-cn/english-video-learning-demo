@@ -172,13 +172,24 @@ function groupTranscriptLines(segments) {
   const lines = []
   let current = null
 
-  for (const segment of segments) {
+  for (let segment of segments) {
     if (!current) {
       current = { ...segment }
       continue
     }
 
     if (shouldBreakTranscriptLine(current, segment)) {
+      const movedConnector = current.text.match(/\s+(and|but|so|then)$/i)?.[1]
+      if (movedConnector) {
+        current = {
+          ...current,
+          text: current.text.replace(/\s+(and|but|so|then)$/i, '').trim(),
+        }
+        segment = {
+          ...segment,
+          text: `${movedConnector} ${segment.text}`.replace(/\s+/g, ' ').trim(),
+        }
+      }
       lines.push(current)
       current = { ...segment }
     } else {
