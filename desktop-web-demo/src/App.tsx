@@ -122,6 +122,52 @@ function getHostnameLabel(url: string) {
   }
 }
 
+function parseNumberedTranslations(answer: string, expectedCount: number) {
+  const parsed: string[] = []
+
+  answer
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const numberedMatch = line.match(/^(\d+)\s*[).\u3001:-]\s*(.+)$/)
+      if (numberedMatch) {
+        const index = Number(numberedMatch[1]) - 1
+        if (index >= 0 && index < expectedCount) {
+          parsed[index] = numberedMatch[2].trim()
+        }
+        return
+      }
+
+      if (parsed.length === 0) {
+        parsed.push(line)
+        return
+      }
+
+      const lastIndex = parsed.length - 1
+      parsed[lastIndex] = [parsed[lastIndex], line].filter(Boolean).join(' ')
+    })
+
+  if (parsed.filter(Boolean).length < expectedCount) {
+    const fallbackLines = answer
+      .split('\n')
+      .map((line) => line.replace(/^\s*\d+\s*[).\u3001:-]\s*/, '').trim())
+      .filter(Boolean)
+
+    fallbackLines.forEach((line, index) => {
+      if (!parsed[index]) {
+        parsed[index] = line
+      }
+    })
+  }
+
+  return Array.from({ length: expectedCount }, (_, index) => parsed[index] ?? '')
+}
+
+function translationKey(videoId: string, language: string, segmentId: string) {
+  return `${videoId}:${language}:${segmentId}`
+}
+
 function App() {
   const [screen, setScreen] = useState<Screen>('library')
   const [rightTab, setRightTab] = useState<RightTab>('info')
@@ -141,6 +187,7 @@ function App() {
   const [showTranslations, setShowTranslations] = useState(false)
   const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
+  const [translationProgress, setTranslationProgress] = useState('')
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
@@ -611,60 +658,71 @@ function App() {
   async function handleTranslateCaptions(language = translationLanguage) {
     setShowTranslations(true)
 
-    if (activeSegmentIndex < 0) {
+    if (transcript.length === 0) {
       return
     }
 
-    const windowStart = Math.max(0, activeSegmentIndex - 1)
-    const segmentsToTranslate = transcript
-      .slice(windowStart, activeSegmentIndex + 3)
-      .filter((segment) => !translatedSegments[`${language}:${segment.id}`])
+    const segmentsToTranslate = transcript.filter(
+      (segment) => !translatedSegments[translationKey(selectedVideo.id, language, segment.id)],
+    )
 
     if (segmentsToTranslate.length === 0) {
+      setToast(`${language} captions are already translated.`)
       return
     }
 
+    const batchSize = 14
+    const batches = Array.from({ length: Math.ceil(segmentsToTranslate.length / batchSize) }, (_, index) =>
+      segmentsToTranslate.slice(index * batchSize, index * batchSize + batchSize),
+    )
+
     setIsTranslating(true)
-    setToast('Translating nearby captions...')
+    setTranslationProgress(`0/${segmentsToTranslate.length}`)
+    setToast(`Translating full transcript to ${language}...`)
 
     try {
-      const numberedLines = segmentsToTranslate
-        .map((segment, index) => `${index + 1}. ${segment.text}`)
-        .join('\n')
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          video: selectedVideo,
-          question:
-            `Translate each numbered transcript line into concise ${language}. Return only the numbered translations, one per line.`,
-          quote: numberedLines,
-        }),
-      })
-      const data = await response.json()
+      let translatedCount = 0
 
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'Translation failed.')
+      for (const batch of batches) {
+        const numberedLines = batch.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
+        const response = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            video: selectedVideo,
+            question:
+              `Translate every numbered transcript line into natural ${language}. Keep the original numbering and return exactly ${batch.length} lines. Do not summarize, merge, explain, or add extra text.`,
+            quote: numberedLines,
+          }),
+        })
+        const data = await response.json()
+
+        if (!response.ok) {
+          throw new Error(data?.error ?? 'Translation failed.')
+        }
+
+        const translatedLines = parseNumberedTranslations(String(data.answer ?? ''), batch.length)
+
+        setTranslatedSegments((current) => {
+          const next = { ...current }
+          batch.forEach((segment, index) => {
+            next[translationKey(selectedVideo.id, language, segment.id)] =
+              translatedLines[index] || 'Translation unavailable.'
+          })
+          return next
+        })
+
+        translatedCount += batch.length
+        setTranslationProgress(`${Math.min(translatedCount, segmentsToTranslate.length)}/${segmentsToTranslate.length}`)
       }
 
-      const translatedLines = String(data.answer ?? '')
-        .split('\n')
-        .map((line) => line.replace(/^\s*\d+[).\u3001-]\s*/, '').trim())
-        .filter(Boolean)
-
-      setTranslatedSegments((current) => {
-        const next = { ...current }
-        segmentsToTranslate.forEach((segment, index) => {
-          next[`${language}:${segment.id}`] = translatedLines[index] ?? 'Translation unavailable.'
-        })
-        return next
-      })
       setToast(`${language} captions are ready.`)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Translation failed.'
       setToast(message)
     } finally {
       setIsTranslating(false)
+      setTranslationProgress('')
     }
   }
 
@@ -1166,7 +1224,7 @@ function App() {
 	                    <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
 	                      {showTranslations ? 'Hide translation' : 'Translate captions'}
 	                    </button>
-                    {isTranslating ? <span>Translating...</span> : null}
+                    {isTranslating ? <span>Translating {translationProgress}</span> : null}
                     {showSyncPrompt ? (
                       <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
                         Jump to current subtitle
@@ -1191,7 +1249,7 @@ function App() {
                     {transcript.map((segment, index) => {
 	                      const isSelected = selectedSegmentIds.includes(segment.id)
 	                      const isActive = activeSegmentIndex === index
-	                      const translationText = translatedSegments[`${translationLanguage}:${segment.id}`]
+	                      const translationText = translatedSegments[translationKey(selectedVideo.id, translationLanguage, segment.id)]
 
                       return (
                         <article
@@ -1204,7 +1262,7 @@ function App() {
                           </button>
                           <div className="reader-line__body">
                             <p className="reader-line__text">{segment.text}</p>
-                            {showTranslations && (translationText || (isTranslating && Math.abs(index - activeSegmentIndex) <= 2)) ? (
+                            {showTranslations && (translationText || isTranslating) ? (
                               <p className="reader-line__translation">{translationText ?? 'Translating...'}</p>
                             ) : null}
                           </div>
