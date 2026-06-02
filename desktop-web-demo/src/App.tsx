@@ -59,6 +59,14 @@ const sidebarCollections = [
 ]
 
 const defaultImportUrl = 'https://www.youtube.com/watch?v=3Y8aq_ofEVs'
+const translationLanguages = [
+  { label: '中文', value: 'Simplified Chinese' },
+  { label: 'Japanese', value: 'Japanese' },
+  { label: 'Korean', value: 'Korean' },
+  { label: 'Spanish', value: 'Spanish' },
+  { label: 'French', value: 'French' },
+]
+const defaultTranslationLanguage = translationLanguages[0].value
 
 function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -131,10 +139,12 @@ function App() {
   const [isAsking, setIsAsking] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [showTranslations, setShowTranslations] = useState(false)
+  const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
+  const [videoScale, setVideoScale] = useState(1)
   const [noteDraft, setNoteDraft] = useState(
     'This passage matters because it reframes the design process as an adaptive learning loop.'
   )
@@ -144,6 +154,7 @@ function App() {
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
+  const readerMainRef = useRef<HTMLElement | null>(null)
   const autoScrollResetRef = useRef<number | null>(null)
   const isAutoScrollingRef = useRef(false)
 
@@ -225,10 +236,23 @@ function App() {
   }, [isPlaying, screen, transcript])
 
   useEffect(() => {
-    if (screen !== 'reader' || activeSegmentIndex < 0 || !isTranscriptFollowing) return
+    if (screen !== 'reader' || activeSegmentIndex < 0) return
 
-    scrollActiveTranscriptLine('smooth')
-  }, [activeSegmentIndex, isTranscriptFollowing, screen])
+    if (isTranscriptFollowing) {
+      scrollActiveTranscriptLine('smooth')
+      return
+    }
+
+    if (isPlaying && !isActiveTranscriptLineVisible()) {
+      setShowSyncPrompt(true)
+    }
+  }, [activeSegmentIndex, isPlaying, isTranscriptFollowing, screen])
+
+  useEffect(() => {
+    if (!isPlaying) {
+      setShowSyncPrompt(false)
+    }
+  }, [isPlaying])
 
   useEffect(() => {
     setAiAnswer('')
@@ -417,7 +441,9 @@ function App() {
 
     const isVisible = isActiveTranscriptLineVisible()
     setIsTranscriptFollowing(isVisible)
-    setShowSyncPrompt(!isVisible)
+    if (!isPlaying || isVisible) {
+      setShowSyncPrompt(false)
+    }
   }
 
   function sendYoutubeCommand(func: 'playVideo' | 'pauseVideo' | 'seekTo' | 'getCurrentTime', args: unknown[] = []) {
@@ -462,6 +488,28 @@ function App() {
       sendYoutubeCommand('playVideo')
       setIsPlaying(true)
     }
+  }
+
+  function handleVideoResizeStart(event: React.PointerEvent<HTMLButtonElement>) {
+    const container = readerMainRef.current
+    if (!container) return
+
+    event.preventDefault()
+    const containerRect = container.getBoundingClientRect()
+
+    function handlePointerMove(pointerEvent: PointerEvent) {
+      const nextWidth = pointerEvent.clientX - containerRect.left
+      const nextScale = Math.min(1, Math.max(0.55, nextWidth / containerRect.width))
+      setVideoScale(nextScale)
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
   }
 
   async function handleImportUrl() {
@@ -541,18 +589,17 @@ function App() {
     }
   }
 
-  async function handleTranslateCaptions() {
-    const nextState = !showTranslations
-    setShowTranslations(nextState)
+  async function handleTranslateCaptions(language = translationLanguage) {
+    setShowTranslations(true)
 
-    if (!nextState || activeSegmentIndex < 0) {
+    if (activeSegmentIndex < 0) {
       return
     }
 
     const windowStart = Math.max(0, activeSegmentIndex - 1)
     const segmentsToTranslate = transcript
       .slice(windowStart, activeSegmentIndex + 3)
-      .filter((segment) => !translatedSegments[segment.id])
+      .filter((segment) => !translatedSegments[`${language}:${segment.id}`])
 
     if (segmentsToTranslate.length === 0) {
       return
@@ -571,7 +618,7 @@ function App() {
         body: JSON.stringify({
           video: selectedVideo,
           question:
-            'Translate each numbered transcript line into concise Simplified Chinese. Return only the numbered Chinese translations, one per line.',
+            `Translate each numbered transcript line into concise ${language}. Return only the numbered translations, one per line.`,
           quote: numberedLines,
         }),
       })
@@ -589,11 +636,11 @@ function App() {
       setTranslatedSegments((current) => {
         const next = { ...current }
         segmentsToTranslate.forEach((segment, index) => {
-          next[segment.id] = translatedLines[index] ?? '这句字幕的中文翻译暂时不可用。'
+          next[`${language}:${segment.id}`] = translatedLines[index] ?? 'Translation unavailable.'
         })
         return next
       })
-      setToast('Chinese captions are ready.')
+      setToast(`${language} captions are ready.`)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Translation failed.'
       setToast(message)
@@ -606,6 +653,11 @@ function App() {
     setIsTranscriptFollowing(true)
     setShowSyncPrompt(false)
     scrollActiveTranscriptLine('smooth')
+  }
+
+  function handleTranslationLanguageChange(language: string) {
+    setTranslationLanguage(language)
+    void handleTranslateCaptions(language)
   }
 
   function handleAskSelectedQuote() {
@@ -992,7 +1044,7 @@ function App() {
           </div>
         ) : (
           <div className="reader-layout">
-            <section className="reader-main">
+            <section className="reader-main" ref={readerMainRef}>
               <header className="reader-main__toolbar">
                 <div className="reader-main__left">
                   <button className="icon-button icon-button--ghost" type="button">
@@ -1026,7 +1078,7 @@ function App() {
               </header>
 
               <div className="reader-scroll">
-                <article className="reader-hero">
+                <article className="reader-hero" style={{ width: `${Math.round(videoScale * 100)}%` }}>
                   <div
                     className={`reader-hero__frame ${selectedVideo.youtubeId ? 'reader-hero__frame--youtube' : ''}`}
                     style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}
@@ -1049,26 +1101,42 @@ function App() {
                     ) : null}
                     <div className="reader-hero__scrim" />
 
-                    <div className="reader-hero__footer">
-                      <div>
-                        <span className="reader-hero__eyebrow">{selectedVideo.coverEyebrow}</span>
-                        <h2>{selectedVideo.coverTitle}</h2>
-                      </div>
-                      <span className="reader-hero__duration">{selectedVideo.durationLabel}</span>
-                    </div>
-                  </div>
-                </article>
+	                    <div className="reader-hero__footer">
+	                      <div>
+	                        <span className="reader-hero__eyebrow">{selectedVideo.coverEyebrow}</span>
+	                        <h2>{selectedVideo.coverTitle}</h2>
+	                      </div>
+	                      <span className="reader-hero__duration">{selectedVideo.durationLabel}</span>
+	                    </div>
+                    <button
+                      className="reader-hero__resize"
+                      type="button"
+                      aria-label="Resize video player"
+                      onPointerDown={handleVideoResizeStart}
+                    />
+	                  </div>
+	                </article>
 
                 <div className="reader-scrubber">
                   <div className="reader-scrubber__fill" style={{ width: `${(currentPosition / selectedVideo.durationSec) * 100}%` }} />
                 </div>
 
                 <section className="reader-text">
-                  <div className="highlight-bar" />
-                  <div className="transcript-toolbar">
-                    <button className="secondary-button" type="button" onClick={handleTranslateCaptions}>
-                      {showTranslations ? 'Hide translation' : 'Translate captions'}
-                    </button>
+	                  <div className="highlight-bar" />
+	                  <div className="transcript-toolbar">
+                    <label className="translation-picker">
+                      <span>Translate to</span>
+                      <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
+                        {translationLanguages.map((language) => (
+                          <option key={language.value} value={language.value}>
+                            {language.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+	                    <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
+	                      {showTranslations ? 'Hide translation' : 'Translate captions'}
+	                    </button>
                     {isTranslating ? <span>Translating...</span> : null}
                     {showSyncPrompt ? (
                       <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
@@ -1092,9 +1160,9 @@ function App() {
                       </article>
                     ) : null}
                     {transcript.map((segment, index) => {
-                      const isSelected = selectedSegmentIds.includes(segment.id)
-                      const isActive = activeSegmentIndex === index
-                      const translationText = translatedSegments[segment.id]
+	                      const isSelected = selectedSegmentIds.includes(segment.id)
+	                      const isActive = activeSegmentIndex === index
+	                      const translationText = translatedSegments[`${translationLanguage}:${segment.id}`]
 
                       return (
                         <article

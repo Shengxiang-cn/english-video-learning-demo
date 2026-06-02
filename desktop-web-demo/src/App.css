@@ -651,6 +651,7 @@
 .desktop-app--reader .reader-hero {
   width: 100%;
   margin: 0;
+  transition: width 120ms ease;
 }
 
 .reader-hero__frame {
@@ -668,6 +669,24 @@
   height: auto;
   border-radius: 0;
   box-shadow: none;
+}
+
+.reader-hero__resize {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 7;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, transparent 52%, rgba(255, 255, 255, 0.9) 53%, rgba(255, 255, 255, 0.9) 58%, transparent 59%),
+    linear-gradient(135deg, transparent 68%, rgba(255, 255, 255, 0.72) 69%, rgba(255, 255, 255, 0.72) 73%, transparent 74%),
+    rgba(18, 22, 29, 0.58);
+  box-shadow: 0 10px 22px rgba(12, 16, 22, 0.22);
+  cursor: nwse-resize;
+  backdrop-filter: blur(10px);
 }
 
 .reader-hero__image,
@@ -844,6 +863,34 @@
 .transcript-toolbar span {
   color: #7d8797;
   font-size: 0.8rem;
+}
+
+.translation-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid #dde3ea;
+  border-radius: 12px;
+  background: #fff;
+  color: #5c687a;
+}
+
+.translation-picker span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.translation-picker select {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #2f3b4e;
+  font: inherit;
+  cursor: pointer;
 }
 
 .reader-text__content {
