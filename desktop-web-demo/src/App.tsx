@@ -2,18 +2,22 @@ import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowLeft,
+  BookOpen,
   ChevronDown,
   Clock3,
+  Compass,
   FileText,
   Globe,
+  Home as HomeIcon,
   Inbox,
   Menu,
   MoreHorizontal,
+  Network,
   NotebookPen,
   Plus,
   Search,
   Settings,
-  Tag,
+  StickyNote,
   Video,
   X,
 } from 'lucide-react'
@@ -25,18 +29,25 @@ import {
   type DemoVideo,
 } from './mockData'
 
-type Screen = 'library' | 'reader'
+type Screen = 'home' | 'library' | 'reader' | 'notes' | 'topics' | 'discover' | 'search' | 'settings'
 type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
-type InboxTab = 'inbox' | 'later' | 'archive'
+type InboxTab = 'inbox' | 'learning' | 'later' | 'archive'
+type NoteType = 'highlight' | 'explanation' | 'keyIdea' | 'reviewQuestion' | 'videoBrief'
 
 type SavedNote = {
   id: string
   videoId: string
+  videoTitle?: string
   quote: string
   timestamp: string
   note: string
   takeaway: string
   tags: string[]
+  type?: NoteType
+  originalSubtitle?: string
+  content?: string
+  topics?: string[]
+  createdAt?: string
   source: 'manual' | 'ai' | 'highlight'
 }
 
@@ -66,9 +77,63 @@ type TranslationStatus = {
   lastError: string
 }
 
-const sidebarCollections = [
-  { label: 'Videos', icon: Video },
-  { label: 'Tags', icon: Tag },
+const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Video }> = [
+  { label: 'Home', screen: 'home', icon: HomeIcon },
+  { label: 'Library', screen: 'library', icon: BookOpen },
+  { label: 'Notes', screen: 'notes', icon: StickyNote },
+  { label: 'Topics', screen: 'topics', icon: Network },
+  { label: 'Discover', screen: 'discover', icon: Compass },
+  { label: 'Search', screen: 'search', icon: Search },
+]
+
+const learningModes = [
+  'Deep Summary',
+  'Transcript Notes',
+  'Key Concepts',
+  'English Learning',
+  'Discussion Questions',
+  'Obsidian Export',
+]
+
+const knowledgeTopics = [
+  { id: 'ai-agent', name: 'AI Agent', meta: '12 videos · 38 notes · 9 review questions', progress: 72, ideas: ['Agents need feedback loops, not only prompts.', 'Evaluation turns demos into systems.'] },
+  { id: 'product-thinking', name: 'Product Thinking', meta: '9 videos · 21 notes · 4 key ideas', progress: 58, ideas: ['Ship smaller loops.', 'Design is now part of execution.'] },
+  { id: 'english-expression', name: 'English Expression', meta: '11 videos · 55 highlights · 18 phrases', progress: 44, ideas: ['Plain English reduces cognitive load.', 'Reusable phrases improve recall.'] },
+  { id: 'startup-business', name: 'Startup / Business', meta: '6 videos · 14 notes · 3 in progress', progress: 36, ideas: ['Distribution is a learning system.', 'Narrative changes strategy.'] },
+  { id: 'cognitive-science', name: 'Cognitive Science', meta: '4 videos · 8 notes · 2 review questions', progress: 28, ideas: ['Memory needs retrieval.', 'Questions beat passive review.'] },
+]
+
+const discoveryItems = [
+  {
+    id: 'editor-ai-agent',
+    title: 'AI Agent 实战指南',
+    channel: 'AI Ascent',
+    duration: '29:45',
+    difficulty: 'Advanced',
+    topics: ['AI Agent', 'Evaluation'],
+    signals: '18 saved · 7 notes · 4 questions',
+    concepts: ['agent loop', 'tool use', 'evals'],
+  },
+  {
+    id: 'product-decision',
+    title: '产品经理的决策模型',
+    channel: 'Product Studio',
+    duration: '42:18',
+    difficulty: 'Intermediate',
+    topics: ['Product Thinking'],
+    signals: '24 saved · 9 notes · 3 questions',
+    concepts: ['tradeoff', 'feedback', 'roadmap'],
+  },
+  {
+    id: 'english-gold',
+    title: '英语表达：访谈金句',
+    channel: 'English Lab',
+    duration: '18:22',
+    difficulty: 'Beginner',
+    topics: ['English Expression'],
+    signals: '31 saved · 12 notes · 8 questions',
+    concepts: ['phrases', 'clarity', 'tone'],
+  },
 ]
 
 const defaultImportUrl = 'https://www.youtube.com/watch?v=3Y8aq_ofEVs'
@@ -135,6 +200,28 @@ function getHostnameLabel(url: string) {
   }
 }
 
+function progressPercent(video: DemoVideo) {
+  return Math.min(Math.round((video.lastPositionSec / Math.max(video.durationSec, 1)) * 100), 100)
+}
+
+function noteTypeLabel(type?: NoteType) {
+  const labels: Record<NoteType, string> = {
+    highlight: 'Highlight',
+    explanation: 'Explanation',
+    keyIdea: 'Key Idea',
+    reviewQuestion: 'Review Question',
+    videoBrief: 'Video Brief',
+  }
+
+  return labels[type ?? 'highlight']
+}
+
+function noteTypeFromSource(note: SavedNote): NoteType {
+  if (note.type) return note.type
+  if (note.source === 'ai') return 'explanation'
+  return 'highlight'
+}
+
 function parseNumberedTranslations(answer: string, expectedCount: number) {
   const parsed: string[] = []
 
@@ -182,9 +269,9 @@ function translationKey(videoId: string, language: string, segmentId: string) {
 }
 
 function App() {
-  const [screen, setScreen] = useState<Screen>('library')
+  const [screen, setScreen] = useState<Screen>('home')
   const [rightTab, setRightTab] = useState<RightTab>('info')
-  const [inboxTab, setInboxTab] = useState<InboxTab>('inbox')
+  const [inboxTab, setInboxTab] = useState<InboxTab>('learning')
   const [videos, setVideos] = useState<DemoVideo[]>(catalogVideos)
   const [libraryIds, setLibraryIds] = useState(initialLibraryIds)
   const [selectedVideoId, setSelectedVideoId] = useState(initialLibraryIds[0])
@@ -198,6 +285,8 @@ function App() {
   const [isAsking, setIsAsking] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [showTranslations, setShowTranslations] = useState(false)
+  const [aiSaveType, setAiSaveType] = useState<Exclude<NoteType, 'highlight' | 'videoBrief'>>('explanation')
+  const [showAiSaveOptions, setShowAiSaveOptions] = useState(false)
   const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
   const [translationStatus, setTranslationStatus] = useState<TranslationStatus>({
@@ -232,6 +321,7 @@ function App() {
   const selectedQuote = transcriptSelection?.quote ?? ''
   const selectedTimestamp = transcriptSelection?.timestamp ?? formatTime(selectedVideo.lastPositionSec)
   const selectedNotes = savedNotes.filter((note) => note.videoId === selectedVideo.id)
+  const allNotes = savedNotes
   const activeSegmentIndex = transcript.findIndex(
     (segment) => currentPosition >= segment.startSec && currentPosition <= segment.endSec,
   )
@@ -710,6 +800,8 @@ function App() {
       setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
       setSelectedVideoId(importedVideo.id)
       setCurrentPosition(importedVideo.lastPositionSec || importedVideo.transcript[0]?.startSec || 0)
+      setScreen('reader')
+      setRightTab(importedVideo.transcript.length ? 'subtitle' : 'info')
       setShowAddModal(false)
       setToast(
         importedVideo.transcript.length
@@ -732,6 +824,7 @@ function App() {
 
     setRightTab('chat')
     setIsAsking(true)
+    setShowAiSaveOptions(false)
     setToast('Asking Kimi about this video...')
 
     try {
@@ -751,6 +844,7 @@ function App() {
       }
 
       setAiAnswer(String(data.answer ?? 'No answer returned.'))
+      setShowAiSaveOptions(true)
       setToast('Kimi answer is ready.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI request failed.'
@@ -901,40 +995,52 @@ function App() {
     }
 
     setChatPrompt(selectedQuote)
+    setAiAnswer('')
+    setShowAiSaveOptions(false)
     setRightTab('chat')
     setToast('Highlight copied into chat. Add your question, then send.')
   }
 
-  async function saveNote(source: SavedNote['source']) {
+  async function saveNote(source: SavedNote['source'], type: NoteType = source === 'ai' ? aiSaveType : 'highlight') {
     if (!selectedQuote) {
       return
     }
 
+    const isAiNote = source === 'ai'
+    const content = isAiNote ? chatAnswer : source === 'highlight' ? selectedQuote : noteDraft
     const note: SavedNote = {
       id: `${selectedVideo.id}-${selectedTimestamp}-${Date.now()}`,
       videoId: selectedVideo.id,
+      videoTitle: selectedVideo.title,
       quote: selectedQuote,
       timestamp: selectedTimestamp,
-      note:
-        source === 'ai'
-          ? `${chatPrompt} ${chatAnswer}`
-          : source === 'highlight'
-            ? 'Saved as a highlighted passage for review later.'
-            : noteDraft,
-      takeaway: source === 'ai' ? chatAnswer : buildTakeaway(selectedVideo, selectedQuote),
+      note: content,
+      takeaway: isAiNote ? chatAnswer : buildTakeaway(selectedVideo, selectedQuote),
       tags: ['video-learning', 'transcript', selectedVideo.channel.toLowerCase().replace(/\s+/g, '-')],
+      type,
+      originalSubtitle: selectedQuote,
+      content,
+      topics: selectedVideo.id === 'learn-faster' ? ['Product Thinking', 'Design'] : ['AI Agent', 'Product Thinking'],
+      createdAt: new Date().toISOString(),
       source,
     }
 
     setSavedNotes((current) => [note, ...current])
     setRightTab('note')
     setShowNoteModal(false)
+    setShowAiSaveOptions(false)
     clearNativeSelection()
+
+    if (isAiNote) {
+      setAiAnswer('')
+      setChatPrompt(askSuggestions[1])
+    }
+
     const savedMessage =
       source === 'ai'
-        ? 'Saved AI note to notebook.'
+        ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
         : source === 'highlight'
-          ? 'Saved highlighted passage to notebook.'
+          ? 'Saved as Highlight.'
           : 'Saved note to notebook.'
     setToast(savedMessage)
 
@@ -984,6 +1090,319 @@ function App() {
     setToast('Markdown exported.')
   }
 
+  function renderHomePage() {
+    const recentVideos = libraryIds.map((id) => findVideoById(videos, id)).slice(0, 3)
+
+    return (
+      <div className="page-shell home-page">
+        <section className="home-hero">
+          <p className="page-eyebrow">Deep YouTube Learning Workspace</p>
+          <h2>Learn deeply from YouTube videos</h2>
+          <p>Paste a YouTube URL and turn it into notes, highlights, questions and review cards.</p>
+          <form
+            className="home-import"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleImportUrl()
+            }}
+          >
+            <input
+              value={linkInput}
+              onChange={(event) => setLinkInput(event.target.value)}
+              placeholder="Paste YouTube URL..."
+              disabled={isImporting}
+            />
+            <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
+              {isImporting ? 'Importing...' : 'Start Learning'}
+            </button>
+          </form>
+          <div className="mode-pills">
+            {learningModes.map((mode) => (
+              <span key={mode}>{mode}</span>
+            ))}
+          </div>
+        </section>
+
+        <section className="page-section">
+          <div className="section-heading">
+            <div>
+              <p>Recent Learning</p>
+              <h3>Continue where your last video became knowledge</h3>
+            </div>
+            <button className="text-button" type="button" onClick={() => setScreen('library')}>
+              View All
+            </button>
+          </div>
+          <div className="recent-grid">
+            <button className="learning-card learning-card--new" type="button" onClick={() => setShowAddModal(true)}>
+              <div className="learning-card__placeholder"><Plus size={24} /></div>
+              <strong>Import New Video</strong>
+              <span>粘贴链接开始学习</span>
+            </button>
+            {recentVideos.map((video) => {
+              const videoNotes = savedNotes.filter((note) => note.videoId === video.id)
+              return (
+                <button key={video.id} className="learning-card" type="button" onClick={() => openReader(video.id)}>
+                  <div className="learning-card__thumb" style={{ background: `linear-gradient(160deg, #f9f5ef, ${video.accent})` }}>
+                    {video.coverImage ? <img alt={video.title} src={video.coverImage} /> : null}
+                    <span>{video.durationLabel}</span>
+                  </div>
+                  <strong>{video.title}</strong>
+                  <small>{video.channel}</small>
+                  <div className="learning-card__meta">
+                    <span>Progress {progressPercent(video)}%</span>
+                    <span>{Math.max(videoNotes.length, video.id === 'jenny-design' ? 8 : 3)} notes</span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <div className="home-columns">
+          <section className="page-section knowledge-card">
+            <div className="section-heading">
+              <div>
+                <p>My Knowledge Map</p>
+                <h3>知识正在从学习行为中长出来</h3>
+              </div>
+            </div>
+            <div className="topic-list">
+              {knowledgeTopics.map((topic) => (
+                <button key={topic.id} className="topic-row" type="button" onClick={() => setScreen('topics')}>
+                  <span>{topic.name}</span>
+                  <small>{topic.meta}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="page-section">
+            <div className="section-heading">
+              <div>
+                <p>Learning Discovery</p>
+                <h3>Editor’s picks for deep learning</h3>
+              </div>
+              <button className="text-button" type="button" onClick={() => setScreen('discover')}>
+                Explore
+              </button>
+            </div>
+            <div className="discovery-strip">
+              {discoveryItems.map((item) => (
+                <article key={item.id} className="mini-discovery-card">
+                  <strong>{item.title}</strong>
+                  <span>{item.signals}</span>
+                  <small>{item.concepts.join(' · ')}</small>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <section className="page-section">
+          <div className="section-heading">
+            <div>
+              <p>Recent Notes</p>
+              <h3>Latest learning artifacts saved from videos</h3>
+            </div>
+            <button className="text-button" type="button" onClick={() => setScreen('notes')}>
+              Open Notes
+            </button>
+          </div>
+          <div className="note-preview-grid">
+            {allNotes.length ? (
+              allNotes.slice(0, 3).map((note) => (
+                <article key={note.id} className="global-note-card">
+                  <span>{noteTypeLabel(noteTypeFromSource(note))}</span>
+                  <strong>{note.videoTitle ?? findVideoById(videos, note.videoId).title}</strong>
+                  <p>{note.content ?? note.takeaway ?? note.note}</p>
+                </article>
+              ))
+            ) : (
+              <article className="empty-card">
+                <strong>No saved notes yet</strong>
+                <p>Highlight subtitles in a video, ask AI, then save the answer into your notebook.</p>
+              </article>
+            )}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  function renderNotesPage() {
+    const noteTabs: Array<{ label: string; type?: NoteType }> = [
+      { label: 'All Notes' },
+      { label: 'Highlights', type: 'highlight' },
+      { label: 'Explanations', type: 'explanation' },
+      { label: 'Key Ideas', type: 'keyIdea' },
+      { label: 'Review Questions', type: 'reviewQuestion' },
+      { label: 'Video Briefs', type: 'videoBrief' },
+    ]
+
+    return (
+      <div className="page-shell">
+        <div className="page-title">
+          <p>Global Notebook</p>
+          <h2>Notes 全局笔记</h2>
+          <span>整理所有视频中沉淀出来的 Highlights、AI explanations、Key ideas 和 review questions。</span>
+        </div>
+        <div className="page-tabs">
+          {noteTabs.map((tab) => (
+            <button key={tab.label} className="tabs__item tabs__item--soft" type="button">
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="filter-bar">
+          <span>Video</span>
+          <span>Topic</span>
+          <span>Type</span>
+          <span>Date</span>
+          <button className="secondary-button" type="button" onClick={handleExportMarkdown}>Export Markdown</button>
+        </div>
+        <div className="global-note-list">
+          {allNotes.length ? (
+            allNotes.map((note) => (
+              <article key={note.id} className="global-note-card">
+                <span>{noteTypeLabel(noteTypeFromSource(note))} · {note.timestamp}</span>
+                <strong>{note.videoTitle ?? findVideoById(videos, note.videoId).title}</strong>
+                {note.originalSubtitle || note.quote ? <blockquote>{note.originalSubtitle ?? note.quote}</blockquote> : null}
+                <p>{note.content ?? note.takeaway ?? note.note}</p>
+                <small>{(note.topics ?? note.tags).join(' · ')}</small>
+              </article>
+            ))
+          ) : (
+            <article className="empty-card">
+              <strong>No notebook items yet</strong>
+              <p>Notes saved from Video Study will appear here as long-term learning assets.</p>
+            </article>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderTopicsPage() {
+    return (
+      <div className="page-shell">
+        <div className="page-title">
+          <p>Knowledge Topics</p>
+          <h2>Topics 主题页</h2>
+          <span>Topics 不是手动标签，而是从视频、字幕划线和笔记中自然长出来的知识地图。</span>
+        </div>
+        <div className="topic-grid">
+          {knowledgeTopics.map((topic) => (
+            <article key={topic.id} className="topic-card">
+              <div>
+                <h3>{topic.name}</h3>
+                <span>{topic.meta}</span>
+              </div>
+              <div className="progress-line"><span style={{ width: `${topic.progress}%` }} /></div>
+              <ul>
+                {topic.ideas.map((idea) => <li key={idea}>{idea}</li>)}
+              </ul>
+              <div className="topic-actions">
+                <button className="secondary-button" type="button">Confirm</button>
+                <button className="secondary-button" type="button">Merge</button>
+                <button className="secondary-button" type="button">Rename</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  function renderDiscoverPage() {
+    return (
+      <div className="page-shell">
+        <div className="page-title">
+          <p>Learning Discovery</p>
+          <h2>Discover 学习发现</h2>
+          <span>这里展示 Editor’s Pick / Newly Added / Recommended for Deep Learning，不用 YouTube 播放量替代学习信号。</span>
+        </div>
+        <div className="page-tabs">
+          {['全部', 'AI Agent', '产品', '创业', '设计', '英语', '认知科学', '技术', '商业'].map((tab) => (
+            <button key={tab} className="tabs__item tabs__item--soft" type="button">{tab}</button>
+          ))}
+        </div>
+        <div className="discover-grid">
+          {discoveryItems.map((item) => (
+            <article key={item.id} className="discover-card">
+              <div className="discover-card__cover">{item.channel}<span>{item.duration}</span></div>
+              <div className="discover-card__body">
+                <span>{item.difficulty}</span>
+                <h3>{item.title}</h3>
+                <p>{item.signals}</p>
+                <div className="mode-pills">
+                  {item.topics.map((topic) => <span key={topic}>{topic}</span>)}
+                </div>
+                <small>Core concepts: {item.concepts.join(', ')}</small>
+                <div className="topic-actions">
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAddModal(true)}>Start Learning</button>
+                  <button className="secondary-button" type="button" onClick={() => setScreen('notes')}>View Notes</button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  function renderSearchPage() {
+    return (
+      <div className="page-shell">
+        <div className="page-title">
+          <p>Global Search</p>
+          <h2>Search 全局搜索</h2>
+          <span>搜索视频标题、频道、字幕、Notes、Highlights、Key Ideas、Review Questions 和 Topics。</span>
+        </div>
+        <div className="search-hero">
+          <Search size={20} />
+          <input placeholder="Search videos, subtitles, notes, topics..." />
+        </div>
+        <div className="search-groups">
+          {['Videos', 'Notes', 'Topics', 'Transcript Matches'].map((group) => (
+            <section key={group} className="page-section">
+              <p>{group}</p>
+              <article className="empty-card">
+                <strong>{group} results</strong>
+                <p>Search results will be grouped here once a query is entered.</p>
+              </article>
+            </section>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  function renderSettingsPage() {
+    return (
+      <div className="page-shell">
+        <div className="page-title">
+          <p>Workspace Settings</p>
+          <h2>Settings 设置</h2>
+          <span>管理导入、字幕、AI、导出和学习偏好。</span>
+        </div>
+        <div className="settings-grid">
+          {[
+            ['Default learning mode', 'Deep Summary + Transcript Notes'],
+            ['Subtitle language', 'Original + optional translation'],
+            ['AI provider', 'Kimi configured on Render'],
+            ['Export target', 'Markdown / Obsidian ready'],
+          ].map(([label, value]) => (
+            <article key={label} className="setting-card">
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </article>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <main className={`desktop-app ${screen === 'reader' ? 'desktop-app--reader' : ''}`}>
       <aside className="sidebar">
@@ -999,8 +1418,9 @@ function App() {
               return (
                 <button
                   key={item.label}
-                  className={`nav-link nav-link--subtle ${item.label === 'Videos' ? 'nav-link--selected' : ''}`}
+                  className={`nav-link nav-link--subtle ${screen === item.screen ? 'nav-link--selected' : ''}`}
                   type="button"
+                  onClick={() => setScreen(item.screen)}
                 >
                   <Icon size={17} />
                   <span>{item.label}</span>
@@ -1011,13 +1431,9 @@ function App() {
         </nav>
 
         <div className="sidebar__footer">
-          <button className="nav-link nav-link--subtle" type="button">
-            <Search size={18} />
-            <span>Search</span>
-          </button>
-          <button className="nav-link nav-link--subtle" type="button">
+          <button className={`nav-link nav-link--subtle ${screen === 'settings' ? 'nav-link--selected' : ''}`} type="button" onClick={() => setScreen('settings')}>
             <Settings size={18} />
-            <span>Preferences</span>
+            <span>Settings</span>
           </button>
         </div>
       </aside>
@@ -1029,6 +1445,7 @@ function App() {
           </button>
         ) : null}
 
+        {screen === 'library' ? (
         <header className="workspace__topbar">
           <div className="workspace__group">
             <div className="library-title">
@@ -1041,7 +1458,7 @@ function App() {
 
             {screen === 'library' ? (
               <div className="tabs">
-                {(['inbox', 'later', 'archive'] as InboxTab[]).map((tab) => (
+                {(['inbox', 'learning', 'later', 'archive'] as InboxTab[]).map((tab) => (
                   <button
                     key={tab}
                     className={`tabs__item ${inboxTab === tab ? 'tabs__item--active' : ''}`}
@@ -1085,14 +1502,20 @@ function App() {
             </button>
           </div>
         </header>
+        ) : null}
 
-        {screen === 'library' ? (
+        {screen === 'home' ? (
+          renderHomePage()
+        ) : screen === 'library' ? (
           <div className="library-layout">
             <section className="list-pane">
               <div className="rows">
                 {libraryIds.map((videoId, index) => {
                   const video = findVideoById(videos, videoId)
                   const isActive = video.id === selectedVideoId
+                  const videoNotes = savedNotes.filter((note) => note.videoId === video.id)
+                  const highlightCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length
+                  const questionCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length
 
                   return (
                     <button
@@ -1116,6 +1539,13 @@ function App() {
                           <span>{getHostnameLabel(video.youtubeUrl)}</span>
                           <span>{video.channel}</span>
                           <span>{video.durationLabel}</span>
+                        </div>
+                        <div className="library-row__stats">
+                          <span>Progress {progressPercent(video)}%</span>
+                          <span>Notes {Math.max(videoNotes.length, index === 0 ? 12 : 6)}</span>
+                          <span>Highlights {Math.max(highlightCount, index === 0 ? 34 : 18)}</span>
+                          <span>Questions {Math.max(questionCount, index === 0 ? 5 : 2)}</span>
+                          <span>{index === 0 ? 'today' : index === 1 ? 'today' : 'yesterday'}</span>
                         </div>
                       </div>
                     </button>
@@ -1165,7 +1595,20 @@ function App() {
                       <div><dt>Length</dt><dd>{selectedVideo.durationLabel}</dd></div>
                       <div><dt>Saved</dt><dd>about 2 hours ago</dd></div>
                       <div><dt>Progress</dt><dd>{Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</dd></div>
+                      <div><dt>Notes</dt><dd>{selectedNotes.length}</dd></div>
+                      <div><dt>Highlights</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</dd></div>
+                      <div><dt>Questions</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</dd></div>
                     </dl>
+                  </section>
+
+                  <section className="meta-section">
+                    <p>Suggested Topics</p>
+                    <div className="mode-pills mode-pills--left">
+                      {(selectedVideo.id === 'learn-faster' ? ['Design', 'Product Thinking'] : ['AI Agent', 'Product Thinking']).map((topic) => <span key={topic}>{topic}</span>)}
+                    </div>
+                    <button className="secondary-button" type="button" onClick={() => setToast('Learning Brief generation is queued for the next AI pass.')}>
+                      Generate Learning Brief
+                    </button>
                   </section>
                 </div>
               ) : null}
@@ -1185,10 +1628,10 @@ function App() {
                     {selectedNotes.length ? (
                       selectedNotes.map((note) => (
                         <article key={note.id} className="note-card">
-                          <span>{note.timestamp}</span>
-                          <blockquote>{note.quote}</blockquote>
-                          <p>{note.note}</p>
-                          <small>{note.takeaway}</small>
+                          <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
+                          <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
+                          <p>{note.content ?? note.note}</p>
+                          <small>{(note.topics ?? note.tags).join(' · ')}</small>
                         </article>
                       ))
                     ) : (
@@ -1217,9 +1660,21 @@ function App() {
                         <span>Kimi answer</span>
                         <p>{chatAnswer}</p>
                         <div className="chat-card__actions">
-                          <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                            Save to notebook
+                          <button className="secondary-button" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!selectedQuote}>
+                            Save to Notebook
                           </button>
+                          {showAiSaveOptions ? (
+                            <div className="save-type-picker">
+                              <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'videoBrief'>)}>
+                                <option value="explanation">Save as Explanation</option>
+                                <option value="keyIdea">Save as Key Idea</option>
+                                <option value="reviewQuestion">Save as Review Question</option>
+                              </select>
+                              <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('ai', aiSaveType)}>
+                                Save
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </article>
                     ) : (
@@ -1247,7 +1702,7 @@ function App() {
               ) : null}
             </aside>
           </div>
-        ) : (
+        ) : screen === 'reader' ? (
 	          <div
               ref={readerLayoutRef}
               className="reader-layout"
@@ -1420,7 +1875,20 @@ function App() {
                       <div><dt>Domain</dt><dd>{getHostnameLabel(selectedVideo.youtubeUrl)}</dd></div>
                       <div><dt>Length</dt><dd>{selectedVideo.durationLabel}</dd></div>
                       <div><dt>Progress</dt><dd>{Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</dd></div>
+                      <div><dt>Notes</dt><dd>{selectedNotes.length}</dd></div>
+                      <div><dt>Highlights</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</dd></div>
+                      <div><dt>Questions</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</dd></div>
                     </dl>
+                  </section>
+
+                  <section className="meta-section">
+                    <p>Suggested Topics</p>
+                    <div className="mode-pills mode-pills--left">
+                      {(selectedVideo.id === 'learn-faster' ? ['Design', 'Product Thinking'] : ['AI Agent', 'Product Thinking']).map((topic) => <span key={topic}>{topic}</span>)}
+                    </div>
+                    <button className="secondary-button" type="button" onClick={() => setToast('Learning Brief generation is queued for the next AI pass.')}>
+                      Generate Learning Brief
+                    </button>
                   </section>
                 </div>
               ) : null}
@@ -1440,10 +1908,10 @@ function App() {
                     {selectedNotes.length ? (
                       selectedNotes.map((note) => (
                         <article key={note.id} className="note-card">
-                          <span>{note.timestamp}</span>
-                          <blockquote>{note.quote}</blockquote>
-                          <p>{note.note}</p>
-                          <small>{note.takeaway}</small>
+                          <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
+                          <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
+                          <p>{note.content ?? note.note}</p>
+                          <small>{(note.topics ?? note.tags).join(' · ')}</small>
                         </article>
                       ))
                     ) : (
@@ -1472,9 +1940,21 @@ function App() {
                         <span>Kimi answer</span>
                         <p>{chatAnswer}</p>
                         <div className="chat-card__actions">
-                          <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                            Save to notebook
+                          <button className="secondary-button" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!selectedQuote}>
+                            Save to Notebook
                           </button>
+                          {showAiSaveOptions ? (
+                            <div className="save-type-picker">
+                              <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'videoBrief'>)}>
+                                <option value="explanation">Save as Explanation</option>
+                                <option value="keyIdea">Save as Key Idea</option>
+                                <option value="reviewQuestion">Save as Review Question</option>
+                              </select>
+                              <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('ai', aiSaveType)}>
+                                Save
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </article>
                     ) : (
@@ -1554,6 +2034,16 @@ function App() {
               ) : null}
             </aside>
           </div>
+        ) : screen === 'notes' ? (
+          renderNotesPage()
+        ) : screen === 'topics' ? (
+          renderTopicsPage()
+        ) : screen === 'discover' ? (
+          renderDiscoverPage()
+        ) : screen === 'search' ? (
+          renderSearchPage()
+        ) : (
+          renderSettingsPage()
         )}
       </section>
 
@@ -1573,8 +2063,8 @@ function App() {
             >
               {isAsking ? 'Asking...' : 'Ask AI'}
             </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight')}>
-              Add note
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight', 'highlight')}>
+              Save to Notebook
             </button>
             <button className="selection-float__ghost" type="button" onClick={clearNativeSelection}>
               <X size={16} />
