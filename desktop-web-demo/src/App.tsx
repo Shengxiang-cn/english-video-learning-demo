@@ -9,11 +9,8 @@ import {
   FileText,
   Globe,
   Home as HomeIcon,
-  Inbox,
   Menu,
-  MoreHorizontal,
   Network,
-  NotebookPen,
   Plus,
   Search,
   Settings,
@@ -1709,88 +1706,69 @@ function App() {
               style={readerLeftWidth ? { gridTemplateColumns: `${readerLeftWidth}px minmax(340px, 1fr)` } : undefined}
             >
             <section className="reader-main">
-              <header className="reader-main__toolbar">
-                <div className="reader-main__left">
-                  <button className="icon-button icon-button--ghost" type="button">
-                    Aa
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <FileText size={18} />
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <Video size={18} />
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <Globe size={18} />
-                  </button>
-                </div>
-
-                <div className="reader-main__right">
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <NotebookPen size={18} />
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <Clock3 size={18} />
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <Inbox size={18} />
-                  </button>
-                  <button className="icon-button icon-button--ghost" type="button">
-                    <MoreHorizontal size={18} />
-                  </button>
-                </div>
-              </header>
-
               <div className="reader-scroll">
-                <article className="reader-hero">
-                  <div
-                    className={`reader-hero__frame ${selectedVideo.youtubeId ? 'reader-hero__frame--youtube' : ''}`}
-                    style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}
-                  >
-                    {selectedVideo.youtubeId ? (
-                      <iframe
-                        ref={youtubeFrameRef}
-                        className="reader-hero__iframe"
-                        title={selectedVideo.title}
-                        src={`https://www.youtube.com/embed/${selectedVideo.youtubeId}?enablejsapi=1&rel=0&modestbranding=1&origin=${encodeURIComponent(window.location.origin)}`}
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
+                <article className="study-player-card">
+                  <header className="study-player-card__header">
+                    <div>
+                      <h2>{selectedVideo.title}</h2>
+                      <p>{selectedVideo.channel}</p>
+                    </div>
+                  </header>
+
+                  <article className="reader-hero">
+                    <div
+                      className={`reader-hero__frame ${selectedVideo.youtubeId ? 'reader-hero__frame--youtube' : ''}`}
+                      style={{ background: `linear-gradient(135deg, #f1c18e, ${selectedVideo.accent})` }}
+                    >
+                      {selectedVideo.youtubeId ? (
+                        <iframe
+                          ref={youtubeFrameRef}
+                          className="reader-hero__iframe"
+                          title={selectedVideo.title}
+                          src={`https://www.youtube.com/embed/${selectedVideo.youtubeId}?enablejsapi=1&rel=0&modestbranding=1&origin=${encodeURIComponent(window.location.origin)}`}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                        />
+                      ) : selectedVideo.playerImage ?? selectedVideo.coverImage ? (
+                        <img
+                          className="reader-hero__image"
+                          alt={selectedVideo.title}
+                          src={selectedVideo.playerImage ?? selectedVideo.coverImage}
+                        />
+                      ) : null}
+                      <button
+                        className="reader-hero__edge reader-hero__edge--right"
+                        type="button"
+                        aria-label="Resize video player horizontally"
+                        onPointerDown={(event) => handleVideoResizeStart('horizontal', event)}
                       />
-                    ) : selectedVideo.playerImage ?? selectedVideo.coverImage ? (
-                      <img
-                        className="reader-hero__image"
-                        alt={selectedVideo.title}
-                        src={selectedVideo.playerImage ?? selectedVideo.coverImage}
+                      <button
+                        className="reader-hero__edge reader-hero__edge--bottom"
+                        type="button"
+                        aria-label="Resize video player vertically"
+                        onPointerDown={(event) => handleVideoResizeStart('vertical', event)}
                       />
-                    ) : null}
-                    <div className="reader-hero__scrim" />
+                    </div>
+                  </article>
 
-	                    <div className="reader-hero__footer">
-	                      <div>
-	                        <span className="reader-hero__eyebrow">{selectedVideo.coverEyebrow}</span>
-	                        <h2>{selectedVideo.coverTitle}</h2>
-	                      </div>
-	                      <span className="reader-hero__duration">{selectedVideo.durationLabel}</span>
-	                    </div>
-                    <button
-                      className="reader-hero__edge reader-hero__edge--right"
-                      type="button"
-                      aria-label="Resize video player horizontally"
-                      onPointerDown={(event) => handleVideoResizeStart('horizontal', event)}
-                    />
-                    <button
-                      className="reader-hero__edge reader-hero__edge--bottom"
-                      type="button"
-                      aria-label="Resize video player vertically"
-                      onPointerDown={(event) => handleVideoResizeStart('vertical', event)}
-                    />
-	                  </div>
-	                </article>
+                  <div className="study-player-progress">
+                    <span>{formatTime(currentPosition)} / {selectedVideo.durationLabel}</span>
+                    <div>
+                      <i style={{ width: `${(currentPosition / selectedVideo.durationSec) * 100}%` }} />
+                    </div>
+                  </div>
+                </article>
 
-                <div className="reader-scrubber">
-                  <div className="reader-scrubber__fill" style={{ width: `${(currentPosition / selectedVideo.durationSec) * 100}%` }} />
-                </div>
-
+                <section className="study-goal-card">
+                  <p>当前学习目标</p>
+                  <strong>看一段字幕 → Ask AI 问懂 → Save to Notebook 选择保存类型 → 清空 Chat 继续下一段。</strong>
+                  <div>
+                    <span>Progress {Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</span>
+                    <span>Notes {selectedNotes.length}</span>
+                    <span>Highlights {selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</span>
+                    <span>Questions {selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</span>
+                  </div>
+                </section>
               </div>
             </section>
 
@@ -1804,7 +1782,7 @@ function App() {
                       type="button"
                       onClick={() => setRightTab(tab)}
                     >
-                      {tab}
+                      {tab.toUpperCase()}
                       {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
                     </button>
                   ))}
@@ -1926,6 +1904,14 @@ function App() {
 
               {rightTab === 'chat' ? (
                 <div className="detail-panel detail-panel--chat">
+                  {selectedQuote ? (
+                    <section className="chat-context-card">
+                      <span>Context from subtitle</span>
+                      <p>{selectedQuote}</p>
+                    </section>
+                  ) : null}
+
+                  <p className="panel-kicker">Suggested prompts</p>
                   <div className="chat-suggestions">
                     {askSuggestions.map((suggestion) => (
                       <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
@@ -1937,10 +1923,10 @@ function App() {
                   <div className="chat-thread">
                     {aiAnswer ? (
                       <article className="chat-card">
-                        <span>Kimi answer</span>
+                        <span>AI Answer</span>
                         <p>{chatAnswer}</p>
-                        <div className="chat-card__actions">
-                          <button className="secondary-button" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!selectedQuote}>
+                        <div className="chat-card__actions chat-card__actions--stacked">
+                          <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!selectedQuote}>
                             Save to Notebook
                           </button>
                           {showAiSaveOptions ? (
@@ -1966,7 +1952,7 @@ function App() {
                   </div>
 
                   <section className="meta-section chat-composer-section">
-                    <p>Chat</p>
+                    <p>Ask about this video</p>
                     <div className="chat-composer">
                       <textarea
                         value={chatPrompt}
@@ -1983,6 +1969,7 @@ function App() {
 
               {rightTab === 'subtitle' ? (
                 <div className="detail-panel detail-panel--subtitle">
+                  <p className="panel-kicker panel-kicker--subtitle">Subtitle 字幕</p>
                   <section className="reader-text reader-text--side">
                     <div className="highlight-bar" />
                     <div ref={transcriptContentRef} className="reader-text__content" onScroll={handleTranscriptScroll}>
@@ -1993,11 +1980,6 @@ function App() {
                             Jump back
                           </button>
                         </div>
-                      ) : null}
-                      {showSyncPrompt ? (
-                        <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
-                          Jump to current subtitle
-                        </button>
                       ) : null}
                       {transcript.length === 0 ? (
                         <article className="empty-card">
