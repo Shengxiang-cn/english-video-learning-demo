@@ -130,6 +130,11 @@ function App() {
   const [aiAnswer, setAiAnswer] = useState('')
   const [isAsking, setIsAsking] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  const [showTranslations, setShowTranslations] = useState(false)
+  const [isTranslating, setIsTranslating] = useState(false)
+  const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
+  const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
+  const [showSyncPrompt, setShowSyncPrompt] = useState(false)
   const [noteDraft, setNoteDraft] = useState(
     'This passage matters because it reframes the design process as an adaptive learning loop.'
   )
@@ -139,6 +144,8 @@ function App() {
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
+  const autoScrollResetRef = useRef<number | null>(null)
+  const isAutoScrollingRef = useRef(false)
 
   const selectedVideo = findVideoById(videos, selectedVideoId)
   const transcript = selectedVideo.transcript
@@ -218,11 +225,10 @@ function App() {
   }, [isPlaying, screen, transcript])
 
   useEffect(() => {
-    if (screen !== 'reader' || activeSegmentIndex < 0) return
+    if (screen !== 'reader' || activeSegmentIndex < 0 || !isTranscriptFollowing) return
 
-    const activeLine = transcriptContentRef.current?.querySelector('.reader-line--active')
-    activeLine?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [activeSegmentIndex, screen])
+    scrollActiveTranscriptLine('smooth')
+  }, [activeSegmentIndex, isTranscriptFollowing, screen])
 
   useEffect(() => {
     setAiAnswer('')
@@ -254,6 +260,20 @@ function App() {
     window.addEventListener('message', syncYoutubeProgress)
     return () => window.removeEventListener('message', syncYoutubeProgress)
   }, [])
+
+  useEffect(() => {
+    if (screen !== 'reader' || !selectedVideo.youtubeId) return
+
+    const timer = window.setInterval(() => {
+      youtubeFrameRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ event: 'listening', id: 'video-learning-demo' }),
+        '*',
+      )
+      sendYoutubeCommand('getCurrentTime')
+    }, 900)
+
+    return () => window.clearInterval(timer)
+  }, [screen, selectedVideo.youtubeId])
 
   useEffect(() => {
     if (!toast) {
@@ -366,7 +386,41 @@ function App() {
     setTranscriptSelection(null)
   }
 
-  function sendYoutubeCommand(func: 'playVideo' | 'pauseVideo' | 'seekTo', args: unknown[] = []) {
+  function isActiveTranscriptLineVisible() {
+    const container = transcriptContentRef.current
+    const activeLine = container?.querySelector('.reader-line--active')
+    if (!container || !activeLine) return true
+
+    const containerRect = container.getBoundingClientRect()
+    const lineRect = activeLine.getBoundingClientRect()
+    return lineRect.top >= containerRect.top + 24 && lineRect.bottom <= containerRect.bottom - 24
+  }
+
+  function scrollActiveTranscriptLine(behavior: ScrollBehavior = 'smooth') {
+    const activeLine = transcriptContentRef.current?.querySelector('.reader-line--active')
+    if (!activeLine) return
+
+    isAutoScrollingRef.current = true
+    activeLine.scrollIntoView({ block: 'center', behavior })
+    setShowSyncPrompt(false)
+
+    if (autoScrollResetRef.current) {
+      window.clearTimeout(autoScrollResetRef.current)
+    }
+    autoScrollResetRef.current = window.setTimeout(() => {
+      isAutoScrollingRef.current = false
+    }, 420)
+  }
+
+  function handleTranscriptScroll() {
+    if (isAutoScrollingRef.current || screen !== 'reader' || activeSegmentIndex < 0) return
+
+    const isVisible = isActiveTranscriptLineVisible()
+    setIsTranscriptFollowing(isVisible)
+    setShowSyncPrompt(!isVisible)
+  }
+
+  function sendYoutubeCommand(func: 'playVideo' | 'pauseVideo' | 'seekTo' | 'getCurrentTime', args: unknown[] = []) {
     youtubeFrameRef.current?.contentWindow?.postMessage(
       JSON.stringify({
         event: 'command',
@@ -401,6 +455,8 @@ function App() {
 
   function handleSeek(startSec: number) {
     setCurrentPosition(startSec)
+    setIsTranscriptFollowing(true)
+    setShowSyncPrompt(false)
     if (selectedVideo.youtubeId) {
       sendYoutubeCommand('seekTo', [startSec, true])
       sendYoutubeCommand('playVideo')
@@ -483,6 +539,73 @@ function App() {
     } finally {
       setIsAsking(false)
     }
+  }
+
+  async function handleTranslateCaptions() {
+    const nextState = !showTranslations
+    setShowTranslations(nextState)
+
+    if (!nextState || activeSegmentIndex < 0) {
+      return
+    }
+
+    const windowStart = Math.max(0, activeSegmentIndex - 1)
+    const segmentsToTranslate = transcript
+      .slice(windowStart, activeSegmentIndex + 3)
+      .filter((segment) => !translatedSegments[segment.id])
+
+    if (segmentsToTranslate.length === 0) {
+      return
+    }
+
+    setIsTranslating(true)
+    setToast('Translating nearby captions...')
+
+    try {
+      const numberedLines = segmentsToTranslate
+        .map((segment, index) => `${index + 1}. ${segment.text}`)
+        .join('\n')
+      const response = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video: selectedVideo,
+          question:
+            'Translate each numbered transcript line into concise Simplified Chinese. Return only the numbered Chinese translations, one per line.',
+          quote: numberedLines,
+        }),
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? 'Translation failed.')
+      }
+
+      const translatedLines = String(data.answer ?? '')
+        .split('\n')
+        .map((line) => line.replace(/^\s*\d+[).\u3001-]\s*/, '').trim())
+        .filter(Boolean)
+
+      setTranslatedSegments((current) => {
+        const next = { ...current }
+        segmentsToTranslate.forEach((segment, index) => {
+          next[segment.id] = translatedLines[index] ?? '这句字幕的中文翻译暂时不可用。'
+        })
+        return next
+      })
+      setToast('Chinese captions are ready.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Translation failed.'
+      setToast(message)
+    } finally {
+      setIsTranslating(false)
+    }
+  }
+
+  function handleJumpToCurrentSubtitle() {
+    setIsTranscriptFollowing(true)
+    setShowSyncPrompt(false)
+    scrollActiveTranscriptLine('smooth')
   }
 
   function handleAskSelectedQuote() {
@@ -830,14 +953,7 @@ function App() {
               ) : null}
 
               {rightTab === 'chat' ? (
-                <div className="detail-panel">
-                  <section className="meta-section">
-                    <p>Chat</p>
-                    <div className="chat-composer">
-                      <input value={chatPrompt} onChange={(event) => setChatPrompt(event.target.value)} />
-                    </div>
-                  </section>
-
+                <div className="detail-panel detail-panel--chat">
                   <div className="chat-suggestions">
                     {askSuggestions.map((suggestion) => (
                       <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
@@ -846,21 +962,38 @@ function App() {
                     ))}
                   </div>
 
-                  <article className="chat-card">
-                    <span>Pinned selection</span>
-                    <blockquote className="chat-quote">
-                      {selectedQuote || 'Select transcript text first. Your exact highlighted words will show up here.'}
-                    </blockquote>
-                    <p>{chatAnswer}</p>
-                    <div className="chat-card__actions">
-                      <button className="secondary-button" type="button" onClick={handleAskAi} disabled={isAsking}>
-                        {isAsking ? 'Asking Kimi...' : 'Ask Kimi'}
-                      </button>
-                      <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                        Save to notebook
+                  <div className="chat-thread">
+                    {aiAnswer ? (
+                      <article className="chat-card">
+                        <span>Kimi answer</span>
+                        <p>{chatAnswer}</p>
+                        <div className="chat-card__actions">
+                          <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
+                            Save to notebook
+                          </button>
+                        </div>
+                      </article>
+                    ) : (
+                      <article className="empty-card">
+                        <strong>Ask about this video</strong>
+                        <p>Highlight transcript text, choose Ask AI, then refine the question here.</p>
+                      </article>
+                    )}
+                  </div>
+
+                  <section className="meta-section chat-composer-section">
+                    <p>Chat</p>
+                    <div className="chat-composer">
+                      <textarea
+                        value={chatPrompt}
+                        onChange={(event) => setChatPrompt(event.target.value)}
+                        placeholder="Ask about this video, or highlight transcript text and choose Ask AI."
+                      />
+                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskAi} disabled={isAsking}>
+                        {isAsking ? 'Sending...' : 'Send'}
                       </button>
                     </div>
-                  </article>
+                  </section>
                 </div>
               ) : null}
             </aside>
@@ -940,21 +1073,26 @@ function App() {
 
                 <section className="reader-text">
                   <div className="highlight-bar" />
-                  {transcriptSelection ? (
-                    <div className="transcript-action-dock" onMouseDown={(event) => event.preventDefault()}>
-                      <span>{selectedTimestamp}</span>
-                      <p>{selectedQuote}</p>
-                      <div>
-                        <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskSelectedQuote}>
-                          {isAsking ? 'Asking...' : 'Ask AI'}
-                        </button>
-                        <button className="secondary-button" type="button" onClick={() => saveNote('highlight')}>
-                          Add note
+                  <div className="transcript-toolbar">
+                    <button className="secondary-button" type="button" onClick={handleTranslateCaptions}>
+                      {showTranslations ? 'Hide translation' : 'Translate captions'}
+                    </button>
+                    {isTranslating ? <span>Translating...</span> : null}
+                    {showSyncPrompt ? (
+                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleJumpToCurrentSubtitle}>
+                        Jump to current subtitle
+                      </button>
+                    ) : null}
+                  </div>
+                  <div ref={transcriptContentRef} className="reader-text__content" onScroll={handleTranscriptScroll}>
+                    {showSyncPrompt ? (
+                      <div className="sync-prompt">
+                        <span>Subtitle position is away from the video.</span>
+                        <button type="button" onClick={handleJumpToCurrentSubtitle}>
+                          Jump back
                         </button>
                       </div>
-                    </div>
-                  ) : null}
-                  <div ref={transcriptContentRef} className="reader-text__content">
+                    ) : null}
                     {transcript.length === 0 ? (
                       <article className="empty-card">
                         <strong>No transcript found</strong>
@@ -964,6 +1102,7 @@ function App() {
                     {transcript.map((segment, index) => {
                       const isSelected = selectedSegmentIds.includes(segment.id)
                       const isActive = activeSegmentIndex === index
+                      const translationText = translatedSegments[segment.id]
 
                       return (
                         <article
@@ -976,6 +1115,9 @@ function App() {
                           </button>
                           <div className="reader-line__body">
                             <p className="reader-line__text">{segment.text}</p>
+                            {showTranslations && (translationText || (isTranslating && Math.abs(index - activeSegmentIndex) <= 2)) ? (
+                              <p className="reader-line__translation">{translationText ?? 'Translating...'}</p>
+                            ) : null}
                           </div>
                         </article>
                       )
@@ -1061,8 +1203,35 @@ function App() {
               ) : null}
 
               {rightTab === 'chat' ? (
-                <div className="detail-panel">
-                  <section className="meta-section">
+                <div className="detail-panel detail-panel--chat">
+                  <div className="chat-suggestions">
+                    {askSuggestions.map((suggestion) => (
+                      <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="chat-thread">
+                    {aiAnswer ? (
+                      <article className="chat-card">
+                        <span>Kimi answer</span>
+                        <p>{chatAnswer}</p>
+                        <div className="chat-card__actions">
+                          <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
+                            Save to notebook
+                          </button>
+                        </div>
+                      </article>
+                    ) : (
+                      <article className="empty-card">
+                        <strong>Ask about this video</strong>
+                        <p>Highlight transcript text, choose Ask AI, then refine the question here.</p>
+                      </article>
+                    )}
+                  </div>
+
+                  <section className="meta-section chat-composer-section">
                     <p>Chat</p>
                     <div className="chat-composer">
                       <textarea
@@ -1075,27 +1244,6 @@ function App() {
                       </button>
                     </div>
                   </section>
-
-                  <div className="chat-suggestions">
-                    {askSuggestions.map((suggestion) => (
-                      <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-
-                  <article className="chat-card">
-                    <span>Pinned selection</span>
-                    <blockquote className="chat-quote">
-                      {selectedQuote || 'Select transcript text first. Your exact highlighted words will show up here.'}
-                    </blockquote>
-                    <p>{chatAnswer}</p>
-                    <div className="chat-card__actions">
-                      <button className="secondary-button" type="button" onClick={() => saveNote('ai')} disabled={!selectedQuote}>
-                        Save to notebook
-                      </button>
-                    </div>
-                  </article>
                 </div>
               ) : null}
             </aside>
