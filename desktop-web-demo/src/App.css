@@ -16,6 +16,146 @@
   background: #f3f6fb;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(105, 169, 255, 0.16), transparent 32%),
+    linear-gradient(135deg, #f7f9fc 0%, #eef3f9 100%);
+  color: #243044;
+}
+
+.auth-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 44px;
+  align-items: center;
+  width: min(980px, 100%);
+}
+
+.auth-panel--loading {
+  display: flex;
+  justify-content: center;
+  width: auto;
+  padding: 28px 34px;
+  border: 1px solid #dfe6ef;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(26, 34, 45, 0.08);
+}
+
+.auth-panel--loading p {
+  margin: 0;
+  color: #66758b;
+}
+
+.auth-copy p {
+  margin: 0 0 12px;
+  color: #6f7e93;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-copy h1 {
+  margin: 0;
+  max-width: 10ch;
+  color: #182231;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.7rem, 6vw, 4.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+}
+
+.auth-copy span {
+  display: block;
+  max-width: 52ch;
+  margin-top: 22px;
+  color: #66758b;
+  line-height: 1.65;
+}
+
+.auth-card {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #dfe6ef;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 24px 70px rgba(26, 34, 45, 0.1);
+}
+
+.auth-card__switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid #dfe6ef;
+  border-radius: 14px;
+  background: #f3f6fa;
+}
+
+.auth-card__switch-item {
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #617086;
+  font: inherit;
+  font-weight: 700;
+}
+
+.auth-card__switch-item--active {
+  background: #fff;
+  color: #1f2b3a;
+  box-shadow: 0 8px 18px rgba(25, 32, 42, 0.08);
+}
+
+.auth-field {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-field span {
+  color: #5d6a7e;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.auth-field input {
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #fff;
+  color: #263141;
+  font: inherit;
+  outline: 0;
+}
+
+.auth-field input:focus {
+  border-color: #8cb8ff;
+  box-shadow: 0 0 0 3px rgba(105, 169, 255, 0.16);
+}
+
+.auth-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #f0c8c8;
+  border-radius: 12px;
+  background: #fff3f3;
+  color: #a14545;
+  line-height: 1.45;
+}
+
+.auth-submit {
+  justify-content: center;
+  min-height: 46px;
+}
+
 .desktop-app--reader .sidebar,
 .desktop-app--reader .workspace__topbar,
 .desktop-app--reader .reader-main__toolbar {
@@ -95,6 +235,47 @@
 .sidebar__footer {
   margin-top: auto;
   padding-bottom: 18px;
+}
+
+.account-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 4px 8px 10px;
+  border: 1px solid #dfe4eb;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #334154;
+}
+
+.account-card div {
+  min-width: 0;
+}
+
+.account-card strong,
+.account-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-card strong {
+  font-size: 0.82rem;
+}
+
+.account-card span {
+  margin-top: 2px;
+  color: #6f7c90;
+  font-size: 0.72rem;
+}
+
+.account-card .icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
 }
 
 .nav-link,
@@ -1388,6 +1569,17 @@
   color: #7b8797;
 }
 
+.chat-card--record {
+  margin-bottom: 12px;
+}
+
+.chat-card__question {
+  display: block;
+  margin-bottom: 12px;
+  color: #263141;
+  line-height: 1.45;
+}
+
 .chat-card .secondary-button {
   margin-top: 14px;
 }
@@ -2259,6 +2451,17 @@
   .nav-link {
     justify-content: center;
   }
+
+  .account-card {
+    display: flex;
+    justify-content: center;
+    padding: 8px;
+  }
+
+  .account-card div,
+  .account-card > svg {
+    display: none;
+  }
 }
 
 @media (max-width: 960px) {
@@ -2300,6 +2503,20 @@
 }
 
 @media (max-width: 720px) {
+  .auth-shell {
+    padding: 18px;
+  }
+
+  .auth-panel {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .auth-copy h1 {
+    max-width: 12ch;
+    font-size: 2.4rem;
+  }
+
   .desktop-app {
     grid-template-columns: 1fr;
   }

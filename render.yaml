@@ -5,18 +5,24 @@ services:
     rootDir: desktop-web-demo
     buildCommand: npm ci && npm run build
     startCommand: npm start
-    disk:
-      name: video-learning-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
+      - key: NODE_VERSION
+        value: 22
       - key: KIMI_API_KEY
         sync: false
       - key: KIMI_BASE_URL
         value: https://api.moonshot.cn/v1
       - key: KIMI_MODEL
         value: kimi-k2.5
+      - key: SUPADATA_API_KEY
+        sync: false
+      - key: VITE_SUPABASE_URL
+        value: https://hllzxgpkssqrgapztzcs.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        value: sb_publishable_nxQDQ9QYtSHJZf8ps1NAFg_biwusEHC
+      - key: SUPABASE_URL
+        value: https://hllzxgpkssqrgapztzcs.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: sb_publishable_nxQDQ9QYtSHJZf8ps1NAFg_biwusEHC
       - key: HOST
         value: 0.0.0.0
-      - key: DATA_DIR
-        value: /var/data
