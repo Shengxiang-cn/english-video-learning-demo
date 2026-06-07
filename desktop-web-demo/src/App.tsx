@@ -25,6 +25,7 @@ import {
   initialLibraryIds,
   type DemoVideo,
 } from './mockData'
+import { isSupabaseConfigured, supabase, toAuthUser } from './supabaseClient'
 
 type Screen = 'home' | 'library' | 'reader' | 'notes'
 type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
@@ -35,6 +36,13 @@ type VideoMeta = {
   status: InboxTab
   isFavourite: boolean
   tags: string[]
+}
+
+type AuthUser = {
+  id: string
+  email: string
+  name: string
+  createdAt: string
 }
 
 type SavedNote = {
@@ -52,12 +60,72 @@ type SavedNote = {
   topics?: string[]
   createdAt?: string
   updatedAt?: string
-  source: 'thought' | 'ai' | 'highlight'
+  savedAt?: string
+  source: 'thought' | 'manual' | 'ai' | 'highlight'
 }
 
-type ServerLibrary = {
-  videos?: DemoVideo[]
-  notes?: SavedNote[]
+type ChatRecord = {
+  id: string
+  videoId: string
+  videoTitle?: string
+  question: string
+  quote?: string
+  answer: string
+  createdAt: string
+}
+
+type LearningVideoRow = {
+  id: string
+  title: string
+  channel: string
+  duration_label: string
+  duration_sec: number
+  last_position_sec: number
+  last_position_label: string
+  summary: string
+  youtube_url: string
+  youtube_id?: string | null
+  source_type?: 'mock' | 'youtube'
+  accent: string
+  cover_image?: string | null
+  player_image?: string | null
+  cover_eyebrow: string
+  cover_title: string
+  cover_detail: string
+  transcript_language?: string | null
+  transcript_source?: string | null
+  transcript_languages?: unknown
+  transcript_error?: unknown
+  transcript: DemoVideo['transcript']
+  saved_at?: string
+}
+
+type LearningNoteRow = {
+  id: string
+  video_id: string
+  video_title?: string | null
+  quote: string
+  timestamp_label: string
+  note: string
+  takeaway: string
+  tags?: string[] | null
+  type?: NoteType | null
+  original_subtitle?: string | null
+  content?: string | null
+  topics?: string[] | null
+  created_at?: string
+  saved_at?: string
+  source: SavedNote['source']
+}
+
+type LearningConversationRow = {
+  id: string
+  video_id: string
+  video_title?: string | null
+  question: string
+  quote?: string | null
+  answer: string
+  created_at: string
 }
 
 type TranscriptSelection = {
@@ -415,7 +483,90 @@ function translationKey(videoId: string, language: string, segmentId: string) {
   return `${videoId}:${language}:${segmentId}`
 }
 
+function rowToVideo(row: LearningVideoRow): DemoVideo {
+  return {
+    id: row.id,
+    title: row.title,
+    channel: row.channel,
+    durationLabel: row.duration_label,
+    durationSec: row.duration_sec,
+    lastPositionSec: row.last_position_sec,
+    lastPositionLabel: row.last_position_label,
+    summary: row.summary,
+    youtubeUrl: row.youtube_url,
+    youtubeId: row.youtube_id ?? undefined,
+    sourceType: row.source_type ?? 'youtube',
+    accent: row.accent,
+    coverImage: row.cover_image ?? undefined,
+    playerImage: row.player_image ?? undefined,
+    coverEyebrow: row.cover_eyebrow,
+    coverTitle: row.cover_title,
+    coverDetail: row.cover_detail,
+    transcript: row.transcript ?? [],
+  }
+}
+
+function noteToRow(note: SavedNote, userId?: string) {
+  return {
+    id: note.id,
+    user_id: userId,
+    video_id: note.videoId,
+    video_title: note.videoTitle ?? null,
+    quote: note.quote,
+    timestamp_label: note.timestamp,
+    note: note.note,
+    takeaway: note.takeaway,
+    tags: note.tags ?? [],
+    type: note.type ?? null,
+    original_subtitle: note.originalSubtitle ?? null,
+    content: note.content ?? null,
+    topics: note.topics ?? [],
+    created_at: note.createdAt ?? new Date().toISOString(),
+    saved_at: note.savedAt ?? new Date().toISOString(),
+    source: note.source,
+  }
+}
+
+function rowToNote(row: LearningNoteRow): SavedNote {
+  return {
+    id: row.id,
+    videoId: row.video_id,
+    videoTitle: row.video_title ?? undefined,
+    quote: row.quote,
+    timestamp: row.timestamp_label,
+    note: row.note,
+    takeaway: row.takeaway,
+    tags: row.tags ?? [],
+    type: row.type ?? undefined,
+    originalSubtitle: row.original_subtitle ?? undefined,
+    content: row.content ?? undefined,
+    topics: row.topics ?? [],
+    createdAt: row.created_at,
+    source: row.source,
+  }
+}
+
+function rowToChatRecord(row: LearningConversationRow): ChatRecord {
+  return {
+    id: row.id,
+    videoId: row.video_id,
+    videoTitle: row.video_title ?? undefined,
+    question: row.question,
+    quote: row.quote ?? '',
+    answer: row.answer,
+    createdAt: row.created_at,
+  }
+}
+
 function App() {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [isAuthChecked, setIsAuthChecked] = useState(false)
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
+  const [authName, setAuthName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [isAuthBusy, setIsAuthBusy] = useState(false)
   const [screen, setScreen] = useState<Screen>('home')
   const [rightTab, setRightTab] = useState<RightTab>('info')
   const [inboxTab, setInboxTab] = useState<LibraryTab>('inbox')
@@ -461,6 +612,7 @@ function App() {
   const [readerLeftWidth, setReaderLeftWidth] = useState<number | null>(null)
   const [noteDraft, setNoteDraft] = useState('')
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([])
+  const [chatRecords, setChatRecords] = useState<ChatRecord[]>([])
   const [toast, setToast] = useState<string | null>('Select text inside the transcript to ask AI or attach a note.')
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
   const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
@@ -474,6 +626,7 @@ function App() {
   const autoScrollResetRef = useRef<number | null>(null)
   const manualScrollResetRef = useRef<number | null>(null)
   const syncPromptDelayRef = useRef<number | null>(null)
+  const lastSavedProgressRef = useRef<Record<string, number>>({})
   const isAutoScrollingRef = useRef(false)
   const isManualTranscriptBrowsingRef = useRef(false)
   const detachedAtSegmentIndexRef = useRef<number | null>(null)
@@ -491,6 +644,7 @@ function App() {
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
     return inboxTab === 'favourite' ? meta.isFavourite : meta.status === inboxTab
   })
+  const selectedChatRecords = chatRecords.filter((record) => record.videoId === selectedVideo.id)
   const activeSegmentIndex = transcript.findIndex(
     (segment) => currentPosition >= segment.startSec && currentPosition <= segment.endSec,
   )
@@ -500,23 +654,89 @@ function App() {
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
   const chatAnswer = aiAnswer || chatResponse
 
+  async function getAccessToken() {
+    if (!supabase) {
+      throw new Error('Supabase is not configured.')
+    }
+
+    const { data, error } = await supabase.auth.getSession()
+    if (error || !data.session?.access_token) {
+      throw new Error('Please log in again.')
+    }
+
+    return data.session.access_token
+  }
+
   useEffect(() => {
     let isMounted = true
 
-    async function loadLibrary() {
-      try {
-        const response = await fetch('/api/library')
-        if (!response.ok) {
-          return
-        }
+    async function loadSession() {
+      if (!supabase) {
+        setIsAuthChecked(true)
+        return
+      }
 
-        const data = (await response.json()) as ServerLibrary
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (isMounted) {
+          setCurrentUser(toAuthUser(data.session?.user ?? null))
+        }
+      } catch {
+        if (isMounted) {
+          setCurrentUser(null)
+        }
+      } finally {
+        if (isMounted) {
+          setIsAuthChecked(true)
+        }
+      }
+    }
+
+    void loadSession()
+    const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(toAuthUser(session?.user ?? null))
+      if (!session?.user) {
+        setSavedNotes([])
+        setChatRecords([])
+      }
+    })
+
+    return () => {
+      isMounted = false
+      subscription?.data.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthChecked || !currentUser) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadLibrary() {
+      if (!supabase) {
+        setToast('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+        return
+      }
+
+      try {
+        const [videosResult, notesResult, conversationsResult] = await Promise.all([
+          supabase.from('learning_videos').select('*').order('saved_at', { ascending: false }),
+          supabase.from('learning_notes').select('*').order('saved_at', { ascending: false }),
+          supabase.from('learning_conversations').select('*').order('created_at', { ascending: false }),
+        ])
+
+        const error = videosResult.error ?? notesResult.error ?? conversationsResult.error
+        if (error) throw error
+
         if (!isMounted) {
           return
         }
 
-        const persistedVideos = data.videos ?? []
-        const persistedNotes = data.notes ?? []
+        const persistedVideos = ((videosResult.data ?? []) as LearningVideoRow[]).map(rowToVideo)
+        const persistedNotes = ((notesResult.data ?? []) as LearningNoteRow[]).map(rowToNote)
+        const persistedConversations = ((conversationsResult.data ?? []) as LearningConversationRow[]).map(rowToChatRecord)
         const mergedVideos = [
           ...persistedVideos,
           ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
@@ -530,13 +750,14 @@ function App() {
         setVideoMeta(initialVideoMeta(mergedVideos))
         setLibraryIds(mergedIds)
         setSavedNotes(persistedNotes)
+        setChatRecords(persistedConversations)
 
         if (persistedVideos.length > 0) {
           setSelectedVideoId(persistedVideos[0].id)
           setCurrentPosition(persistedVideos[0].lastPositionSec || persistedVideos[0].transcript[0]?.startSec || 0)
         }
       } catch {
-        setToast('Local API is unavailable, using demo data for now.')
+        setToast('Unable to load Supabase library. Check database migration and RLS policies.')
       }
     }
 
@@ -545,7 +766,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [currentUser, isAuthChecked])
 
   useEffect(() => {
     if (screen !== 'reader' || !isPlaying || transcript.length === 0) {
@@ -657,6 +878,46 @@ function App() {
 
     return () => window.clearInterval(timer)
   }, [screen, selectedVideo.youtubeId])
+
+  useEffect(() => {
+    if (!currentUser || !supabase || screen !== 'reader' || selectedVideo.sourceType !== 'youtube') {
+      return
+    }
+
+    const supabaseClient = supabase
+    const previousPosition = lastSavedProgressRef.current[selectedVideo.id] ?? selectedVideo.lastPositionSec ?? 0
+    if (Math.abs(currentPosition - previousPosition) < 10) {
+      return
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const safePosition = Math.max(0, Math.round(currentPosition))
+        const { data, error } = await supabaseClient
+          .from('learning_videos')
+          .update({
+            last_position_sec: safePosition,
+            last_position_label: safePosition > 0 ? `Continue at ${formatTime(safePosition)}` : 'Not started',
+            last_watched_at: new Date().toISOString(),
+          })
+          .eq('id', selectedVideo.id)
+          .select('*')
+          .maybeSingle()
+
+        if (error || !data) {
+          return
+        }
+
+        const updatedVideo = rowToVideo(data as LearningVideoRow)
+        lastSavedProgressRef.current[selectedVideo.id] = updatedVideo.lastPositionSec
+        setVideos((current) => current.map((video) => (video.id === updatedVideo.id ? { ...video, ...updatedVideo } : video)))
+      } catch {
+        // Progress persistence is opportunistic; playback should never be interrupted by it.
+      }
+    }, 900)
+
+    return () => window.clearTimeout(timer)
+  }, [currentPosition, currentUser, screen, selectedVideo])
 
   useEffect(() => {
     if (!toast) {
@@ -1019,7 +1280,76 @@ function App() {
     window.addEventListener('pointerup', handlePointerUp)
   }
 
+  async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAuthError('')
+    setIsAuthBusy(true)
+
+    if (!supabase) {
+      setAuthError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+      setIsAuthBusy(false)
+      return
+    }
+
+    try {
+      const authResult = authMode === 'signup'
+        ? await supabase.auth.signUp({
+            email: authEmail,
+            password: authPassword,
+            options: {
+              data: {
+                name: authName.trim() || authEmail.split('@')[0],
+              },
+            },
+          })
+        : await supabase.auth.signInWithPassword({
+            email: authEmail,
+            password: authPassword,
+          })
+
+      if (authResult.error) {
+        throw authResult.error
+      }
+
+      setAuthPassword('')
+      setAuthError('')
+
+      if (authResult.data.session?.user) {
+        setCurrentUser(toAuthUser(authResult.data.session.user))
+        setToast(authMode === 'signup' ? 'Account created. Your workspace is ready.' : 'Logged in.')
+      } else {
+        setToast('Account created. Check your email to confirm before logging in.')
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Authentication failed.')
+    } finally {
+      setIsAuthBusy(false)
+    }
+  }
+
+  async function handleLogout() {
+    await supabase?.auth.signOut().catch(() => null)
+
+    setCurrentUser(null)
+    setScreen('home')
+    setVideos(catalogVideos)
+    setLibraryIds(initialLibraryIds)
+    setSelectedVideoId(initialLibraryIds[0])
+    setCurrentPosition(videoById(initialLibraryIds[0]).lastPositionSec)
+    setSavedNotes([])
+    setChatRecords([])
+    setAiAnswer('')
+    setShowAddModal(false)
+    setTranscriptSelection(null)
+    lastSavedProgressRef.current = {}
+  }
+
   async function handleImportUrl() {
+    if (!currentUser) {
+      setToast('Please log in before importing a YouTube URL.')
+      return
+    }
+
     const url = linkInput.trim()
     if (!url) {
       setToast('Paste a YouTube URL first.')
@@ -1030,9 +1360,13 @@ function App() {
     setToast('Importing YouTube metadata and subtitles...')
 
     try {
+      const accessToken = await getAccessToken()
       const response = await fetch('/api/youtube/import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ url }),
       })
       const data = await response.json()
@@ -1071,6 +1405,11 @@ function App() {
   }
 
   async function handleAskAi() {
+    if (!currentUser) {
+      setToast('Please log in before asking AI.')
+      return
+    }
+
     if (!chatPrompt.trim()) {
       setToast('Type a question for AI first.')
       return
@@ -1082,13 +1421,18 @@ function App() {
     setToast('Asking Kimi about this video...')
 
     try {
+      const accessToken = await getAccessToken()
       const response = await fetch('/api/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           video: selectedVideo,
           question: chatPrompt,
           quote: chatContextQuote,
+          saveConversation: true,
         }),
       })
       const data = await response.json()
@@ -1098,6 +1442,9 @@ function App() {
       }
 
       setAiAnswer(String(data.answer ?? 'No answer returned.'))
+      if (data.conversation) {
+        setChatRecords((current) => [data.conversation as ChatRecord, ...current])
+      }
       setShowAiSaveOptions(true)
       setToast('Kimi answer is ready.')
     } catch (error) {
@@ -1110,14 +1457,19 @@ function App() {
 
   async function translateBatch(batch: TranslationBatch) {
     const numberedLines = batch.segments.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
+    const accessToken = await getAccessToken()
     const response = await fetch('/api/ask', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         video: selectedVideo,
         question:
           `Translate every numbered transcript line into natural ${batch.language}. Keep the original numbering and return exactly ${batch.segments.length} lines. Do not summarize, merge, explain, or add extra text.`,
         quote: numberedLines,
+        saveConversation: false,
       }),
     })
     const data = await response.json()
@@ -1265,18 +1617,19 @@ function App() {
 
   async function persistNote(note: SavedNote) {
     try {
-      const response = await fetch('/api/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note }),
-      })
+      if (!supabase) {
+        throw new Error('Supabase is not configured.')
+      }
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => null)
-        throw new Error(data?.error ?? 'Failed to persist note.')
+      const { error } = await supabase
+        .from('learning_notes')
+        .upsert(noteToRow(note, currentUser?.id), { onConflict: 'user_id,id' })
+
+      if (error) {
+        throw error
       }
     } catch {
-      setToast('Note is saved on screen, but server persistence failed.')
+      setToast('Note is saved on screen, but Supabase persistence failed.')
     }
   }
 
@@ -1427,6 +1780,47 @@ function App() {
     })
     setActiveNoteMenuId(null)
     setToast('Note updated.')
+  }
+
+  function renderChatThread(emptyDescription: string) {
+    return (
+      <div className="chat-thread">
+        {selectedChatRecords.length ? (
+          selectedChatRecords.map((record, index) => (
+            <article key={record.id} className="chat-card chat-card--record">
+              <span>{index === 0 && aiAnswer ? 'AI Answer' : new Date(record.createdAt).toLocaleString()}</span>
+              <strong className="chat-card__question">{record.question}</strong>
+              {record.quote ? <blockquote className="chat-quote">{record.quote}</blockquote> : null}
+              <p>{record.answer}</p>
+              {index === 0 && aiAnswer ? (
+                <div className="chat-card__actions chat-card__actions--stacked">
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
+                    Save to Notebook
+                  </button>
+                  {showAiSaveOptions ? (
+                    <div className="save-type-picker">
+                      <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
+                        <option value="explanation">Save as Explanation</option>
+                        <option value="keyIdea">Save as Key Idea</option>
+                        <option value="reviewQuestion">Save as Review Question</option>
+                      </select>
+                      <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('ai', aiSaveType)}>
+                        Save
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </article>
+          ))
+        ) : (
+          <article className="empty-card">
+            <strong>Ask about this video</strong>
+            <p>{emptyDescription}</p>
+          </article>
+        )}
+      </div>
+    )
   }
 
   function renderHomePage() {
@@ -1659,6 +2053,105 @@ function App() {
     )
   }
 
+  function renderAuthScreen() {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="auth-copy">
+            <p>English Video Learning</p>
+            <h1>Sign in to your learning workspace</h1>
+            <span>Imported videos, notes, watch progress and AI conversations are stored under your account.</span>
+          </div>
+
+          <form className="auth-card" onSubmit={handleAuthSubmit}>
+            <div className="auth-card__switch">
+              <button
+                className={authMode === 'login' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
+                type="button"
+                onClick={() => {
+                  setAuthMode('login')
+                  setAuthError('')
+                }}
+              >
+                Log in
+              </button>
+              <button
+                className={authMode === 'signup' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
+                type="button"
+                onClick={() => {
+                  setAuthMode('signup')
+                  setAuthError('')
+                }}
+              >
+                Sign up
+              </button>
+            </div>
+
+            {authMode === 'signup' ? (
+              <label className="auth-field">
+                <span>Name</span>
+                <input
+                  value={authName}
+                  onChange={(event) => setAuthName(event.target.value)}
+                  placeholder="Your name"
+                  autoComplete="name"
+                />
+              </label>
+            ) : null}
+
+            <label className="auth-field">
+              <span>Email</span>
+              <input
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+                placeholder="you@example.com"
+                type="email"
+                autoComplete="email"
+                required
+              />
+            </label>
+
+            <label className="auth-field">
+              <span>Password</span>
+              <input
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                type="password"
+                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                required
+              />
+            </label>
+
+            {!isSupabaseConfigured ? (
+              <p className="auth-error">Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.</p>
+            ) : null}
+            {authError ? <p className="auth-error">{authError}</p> : null}
+
+            <button className="secondary-button secondary-button--strong auth-submit" type="submit" disabled={isAuthBusy || !isSupabaseConfigured}>
+              {isAuthBusy ? 'Working...' : authMode === 'signup' ? 'Create account' : 'Log in'}
+            </button>
+          </form>
+        </section>
+      </main>
+    )
+  }
+
+  if (!isAuthChecked) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel auth-panel--loading">
+          <div className="add-modal__spinner" />
+          <p>Checking session...</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (!currentUser) {
+    return renderAuthScreen()
+  }
+
   return (
     <main className={`desktop-app ${screen === 'reader' ? 'desktop-app--reader' : ''}`}>
       <aside className="sidebar">
@@ -1709,7 +2202,7 @@ function App() {
                 type="button"
                 onClick={() => {
                   setShowUserMenu(false)
-                  setToast('已退出登录。')
+                  void handleLogout()
                 }}
               >
                 <LogOut size={16} />
@@ -2094,36 +2587,7 @@ function App() {
                     ))}
                   </div>
 
-                  <div className="chat-thread">
-                    {aiAnswer ? (
-                      <article className="chat-card">
-                        <span>AI Answer</span>
-                        <p>{chatAnswer}</p>
-                        <div className="chat-card__actions chat-card__actions--stacked">
-                          <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
-                            Save to notes
-                          </button>
-                          {showAiSaveOptions ? (
-                            <div className="save-type-picker">
-                              <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
-                                <option value="explanation">Save as Explanation</option>
-                                <option value="keyIdea">Save as Key Idea</option>
-                                <option value="reviewQuestion">Save as Review Question</option>
-                              </select>
-                              <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('ai', aiSaveType)}>
-                                Save
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      </article>
-                    ) : (
-                      <article className="empty-card">
-                        <strong>Ask about this video</strong>
-                        <p>Highlight transcript text, choose Ask AI, then refine the question here.</p>
-                      </article>
-                    )}
-                  </div>
+                  {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
 
                   <section className="meta-section chat-composer-section">
                     <p>Ask about this video</p>
