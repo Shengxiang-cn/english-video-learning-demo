@@ -4,17 +4,16 @@ import {
   ArrowLeft,
   BookOpen,
   ChevronDown,
-  Clock3,
-  Compass,
   FileText,
-  Globe,
   Home as HomeIcon,
   LogOut,
-  Network,
+  MessageCircle,
+  MoreHorizontal,
   Plus,
-  Search,
-  Settings,
+  Sparkles,
+  Star,
   StickyNote,
+  ThumbsUp,
   UserCircle,
   Video,
   X,
@@ -28,10 +27,16 @@ import {
 } from './mockData'
 import { isSupabaseConfigured, supabase, toAuthUser } from './supabaseClient'
 
-type Screen = 'home' | 'library' | 'reader' | 'notes' | 'topics' | 'discover' | 'search' | 'settings'
+type Screen = 'home' | 'library' | 'reader' | 'notes'
 type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
-type InboxTab = 'inbox' | 'learning' | 'later' | 'archive'
-type NoteType = 'highlight' | 'explanation' | 'keyIdea' | 'reviewQuestion' | 'videoBrief'
+type InboxTab = 'inbox' | 'learning' | 'done'
+type LibraryTab = InboxTab | 'favourite'
+type NoteType = 'highlight' | 'thought' | 'explanation' | 'keyIdea' | 'reviewQuestion'
+type VideoMeta = {
+  status: InboxTab
+  isFavourite: boolean
+  tags: string[]
+}
 
 type AuthUser = {
   id: string
@@ -54,8 +59,9 @@ type SavedNote = {
   content?: string
   topics?: string[]
   createdAt?: string
+  updatedAt?: string
   savedAt?: string
-  source: 'manual' | 'ai' | 'highlight'
+  source: 'thought' | 'manual' | 'ai' | 'highlight'
 }
 
 type ChatRecord = {
@@ -147,26 +153,6 @@ const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Vi
   { label: 'Home', screen: 'home', icon: HomeIcon },
   { label: 'Library', screen: 'library', icon: BookOpen },
   { label: 'Notes', screen: 'notes', icon: StickyNote },
-  { label: 'Topics', screen: 'topics', icon: Network },
-  { label: 'Discover', screen: 'discover', icon: Compass },
-  { label: 'Search', screen: 'search', icon: Search },
-]
-
-const learningModes = [
-  'Deep Summary',
-  'Transcript Notes',
-  'Key Concepts',
-  'English Learning',
-  'Discussion Questions',
-  'Obsidian Export',
-]
-
-const knowledgeTopics = [
-  { id: 'ai-agent', name: 'AI Agent', meta: '12 videos · 38 notes · 9 review questions', progress: 72, ideas: ['Agents need feedback loops, not only prompts.', 'Evaluation turns demos into systems.'] },
-  { id: 'product-thinking', name: 'Product Thinking', meta: '9 videos · 21 notes · 4 key ideas', progress: 58, ideas: ['Ship smaller loops.', 'Design is now part of execution.'] },
-  { id: 'english-expression', name: 'English Expression', meta: '11 videos · 55 highlights · 18 phrases', progress: 44, ideas: ['Plain English reduces cognitive load.', 'Reusable phrases improve recall.'] },
-  { id: 'startup-business', name: 'Startup / Business', meta: '6 videos · 14 notes · 3 in progress', progress: 36, ideas: ['Distribution is a learning system.', 'Narrative changes strategy.'] },
-  { id: 'cognitive-science', name: 'Cognitive Science', meta: '4 videos · 8 notes · 2 review questions', progress: 28, ideas: ['Memory needs retrieval.', 'Questions beat passive review.'] },
 ]
 
 const discoveryItems = [
@@ -176,9 +162,11 @@ const discoveryItems = [
     channel: 'AI Ascent',
     duration: '29:45',
     difficulty: 'Advanced',
-    topics: ['AI Agent', 'Evaluation'],
-    signals: '18 saved · 7 notes · 4 questions',
-    concepts: ['agent loop', 'tool use', 'evals'],
+    category: 'AI Agent',
+    tags: ['AI Agent', 'Evaluation'],
+    reason: '运营精选：适合练习从长视频里提取 agent loop、tool use 和 evals 的关键观点。',
+    views: '18.4K',
+    likes: '1.2K',
   },
   {
     id: 'product-decision',
@@ -186,9 +174,11 @@ const discoveryItems = [
     channel: 'Product Studio',
     duration: '42:18',
     difficulty: 'Intermediate',
-    topics: ['Product Thinking'],
-    signals: '24 saved · 9 notes · 3 questions',
-    concepts: ['tradeoff', 'feedback', 'roadmap'],
+    category: '产品',
+    tags: ['Product', 'Startup'],
+    reason: '运营精选：适合做 tradeoff、feedback、roadmap 相关的字幕笔记。',
+    views: '42.8K',
+    likes: '3.1K',
   },
   {
     id: 'english-gold',
@@ -196,9 +186,156 @@ const discoveryItems = [
     channel: 'English Lab',
     duration: '18:22',
     difficulty: 'Beginner',
-    topics: ['English Expression'],
-    signals: '31 saved · 12 notes · 8 questions',
-    concepts: ['phrases', 'clarity', 'tone'],
+    category: '英语',
+    tags: ['English', 'Research'],
+    reason: '运营精选：适合把访谈中的表达保存为可复习的英文学习笔记。',
+    views: '96.2K',
+    likes: '8.7K',
+  },
+  {
+    id: 'design-systems',
+    title: '设计系统如何支撑高速产品团队',
+    channel: 'Design Field',
+    duration: '36:04',
+    difficulty: 'Intermediate',
+    category: '设计',
+    tags: ['Design', 'Product'],
+    reason: '运营精选：适合保存 design system 和产品节奏相关片段。',
+    views: '27.6K',
+    likes: '2.4K',
+  },
+  {
+    id: 'startup-pricing',
+    title: '创业公司早期定价的真实取舍',
+    channel: 'Founder Notes',
+    duration: '51:12',
+    difficulty: 'Advanced',
+    category: '创业',
+    tags: ['Startup', 'Business'],
+    reason: '运营精选：适合练习从访谈里提取商业判断。',
+    views: '13.9K',
+    likes: '986',
+  },
+  {
+    id: 'cognitive-learning',
+    title: '为什么主动回忆比重复观看更有效',
+    channel: 'Mind Lab',
+    duration: '24:33',
+    difficulty: 'Beginner',
+    category: '认知科学',
+    tags: ['Research', 'English'],
+    reason: '运营精选：适合建立视频学习和复习之间的连接。',
+    views: '71.5K',
+    likes: '5.6K',
+  },
+  {
+    id: 'tech-architecture',
+    title: 'AI 产品里的上下文工程与系统边界',
+    channel: 'Tech Deep Dive',
+    duration: '44:20',
+    difficulty: 'Advanced',
+    category: '技术',
+    tags: ['AI Agent', 'Research'],
+    reason: '运营精选：适合沉淀 context engineering 的核心表达。',
+    views: '33.1K',
+    likes: '2.9K',
+  },
+  {
+    id: 'business-story',
+    title: '好的商业故事为什么比功能列表更有用',
+    channel: 'Business Craft',
+    duration: '31:48',
+    difficulty: 'Intermediate',
+    category: '商业',
+    tags: ['Business', 'Startup'],
+    reason: '运营精选：适合保存 pitch、叙事、用户价值相关字幕。',
+    views: '58.0K',
+    likes: '4.2K',
+  },
+]
+
+const commonTags = ['Product', 'English', 'Design', 'Startup', 'AI Agent', 'Research']
+
+const demoNotebookNotes: SavedNote[] = [
+  {
+    id: 'demo-note-explanation-1',
+    videoId: 'jenny-design',
+    videoTitle: "How Anthropic's product team moves faster than anyone else",
+    quote: 'The design and engineering relationship changes because prototypes can get in front of users much earlier.',
+    timestamp: '35:35',
+    note: 'AI explains why prototypes compress the product learning loop.',
+    takeaway: 'AI explains why prototypes compress the product learning loop.',
+    tags: ['AI Agent', 'Product Thinking'],
+    type: 'explanation',
+    originalSubtitle: 'The design and engineering relationship changes because prototypes can get in front of users much earlier.',
+    content: 'AI explains why prototypes compress the product learning loop.',
+    topics: ['AI Agent', 'Product Thinking'],
+    createdAt: '2026-06-05T09:00:00.000Z',
+    source: 'ai',
+  },
+  {
+    id: 'demo-note-key-idea-1',
+    videoId: 'learn-faster',
+    videoTitle: "The design process is dead. Here's what's replacing it.",
+    quote: 'Modern design work guides decisions while the product changes underneath the team.',
+    timestamp: '36:13',
+    note: 'Modern design work guides decisions while the product changes underneath the team.',
+    takeaway: 'Modern design work guides decisions while the product changes underneath the team.',
+    tags: ['Design', 'Product Thinking'],
+    type: 'keyIdea',
+    originalSubtitle: 'The design process is dead. Here is what is replacing it.',
+    content: 'Modern design work guides decisions while the product changes underneath the team.',
+    topics: ['Design', 'Product Thinking'],
+    createdAt: '2026-06-05T09:08:00.000Z',
+    source: 'ai',
+  },
+  {
+    id: 'demo-note-review-1',
+    videoId: 'learn-faster',
+    videoTitle: "The design process is dead. Here's what's replacing it.",
+    quote: 'What changes when design stays inside the implementation loop instead of outside it?',
+    timestamp: '36:26',
+    note: 'Review this before the next product planning session.',
+    takeaway: 'Review this before the next product planning session.',
+    tags: ['English Learning', 'Design'],
+    type: 'reviewQuestion',
+    originalSubtitle: 'What changes when design stays inside the implementation loop instead of outside it?',
+    content: 'Review this before the next product planning session.',
+    topics: ['English Learning', 'Design'],
+    createdAt: '2026-06-05T09:14:00.000Z',
+    source: 'ai',
+  },
+  {
+    id: 'demo-note-thought-1',
+    videoId: 'jenny-design',
+    videoTitle: "How Anthropic's product team moves faster than anyone else",
+    quote: 'The team is working with shorter horizons and tighter feedback loops.',
+    timestamp: '36:00',
+    note: 'This is the real operating model shift: design becomes a live decision partner.',
+    takeaway: 'Design becomes a live decision partner.',
+    tags: ['Product', 'Startup'],
+    type: 'thought',
+    originalSubtitle: 'The team is working with shorter horizons and tighter feedback loops.',
+    content: 'This is the real operating model shift: design becomes a live decision partner.',
+    topics: ['Product', 'Startup'],
+    createdAt: '2026-06-05T09:20:00.000Z',
+    source: 'thought',
+  },
+  {
+    id: 'demo-note-highlight-1',
+    videoId: 'product-storytelling',
+    videoTitle: 'Product Storytelling for Technical Founders',
+    quote: 'A strong demo is not a tour of features. It is a controlled sequence of realizations.',
+    timestamp: '08:32',
+    note: 'A strong demo is not a tour of features. It is a controlled sequence of realizations.',
+    takeaway: 'A strong demo is not a tour of features. It is a controlled sequence of realizations.',
+    tags: ['Startup', 'Business'],
+    type: 'highlight',
+    originalSubtitle: 'A strong demo is not a tour of features. It is a controlled sequence of realizations.',
+    content: 'A strong demo is not a tour of features. It is a controlled sequence of realizations.',
+    topics: ['Startup', 'Business'],
+    createdAt: '2026-06-05T09:26:00.000Z',
+    source: 'highlight',
   },
 ]
 
@@ -273,10 +410,10 @@ function progressPercent(video: DemoVideo) {
 function noteTypeLabel(type?: NoteType) {
   const labels: Record<NoteType, string> = {
     highlight: 'Highlight',
+    thought: 'Thought',
     explanation: 'Explanation',
     keyIdea: 'Key Idea',
     reviewQuestion: 'Review Question',
-    videoBrief: 'Video Brief',
   }
 
   return labels[type ?? 'highlight']
@@ -285,7 +422,19 @@ function noteTypeLabel(type?: NoteType) {
 function noteTypeFromSource(note: SavedNote): NoteType {
   if (note.type) return note.type
   if (note.source === 'ai') return 'explanation'
+  if (note.source === 'thought') return 'thought'
   return 'highlight'
+}
+
+function initialVideoMeta(videos: DemoVideo[]) {
+  return videos.reduce<Record<string, VideoMeta>>((acc, video) => {
+    acc[video.id] = {
+      status: video.status ?? (video.lastPositionSec > 0 ? 'learning' : 'inbox'),
+      isFavourite: Boolean(video.isFavourite),
+      tags: video.tags ?? [],
+    }
+    return acc
+  }, {})
 }
 
 function parseNumberedTranslations(answer: string, expectedCount: number) {
@@ -420,21 +569,34 @@ function App() {
   const [isAuthBusy, setIsAuthBusy] = useState(false)
   const [screen, setScreen] = useState<Screen>('home')
   const [rightTab, setRightTab] = useState<RightTab>('info')
-  const [inboxTab, setInboxTab] = useState<InboxTab>('learning')
+  const [inboxTab, setInboxTab] = useState<LibraryTab>('inbox')
   const [videos, setVideos] = useState<DemoVideo[]>(catalogVideos)
+  const [videoMeta, setVideoMeta] = useState<Record<string, VideoMeta>>(() => initialVideoMeta(catalogVideos))
   const [libraryIds, setLibraryIds] = useState(initialLibraryIds)
   const [selectedVideoId, setSelectedVideoId] = useState(initialLibraryIds[0])
   const [currentPosition, setCurrentPosition] = useState(videoById(initialLibraryIds[0]).lastPositionSec)
   const [isPlaying, setIsPlaying] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [showNoteModal, setShowNoteModal] = useState(false)
+  const [showTagModal, setShowTagModal] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [tagModalVideoId, setTagModalVideoId] = useState<string | null>(null)
+  const [tagDraft, setTagDraft] = useState('')
+  const [activeVideoMenuId, setActiveVideoMenuId] = useState<string | null>(null)
+  const [activeNoteMenuId, setActiveNoteMenuId] = useState<string | null>(null)
+  const [likedNoteIds, setLikedNoteIds] = useState<string[]>([])
+  const [noteTypeFilter, setNoteTypeFilter] = useState<NoteType | 'all'>('all')
+  const [noteVideoFilter, setNoteVideoFilter] = useState('all')
+  const [noteTagFilter, setNoteTagFilter] = useState('all')
+  const [noteStarredOnly, setNoteStarredOnly] = useState(false)
+  const [noteSortOrder, setNoteSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [linkInput, setLinkInput] = useState(defaultImportUrl)
-  const [chatPrompt, setChatPrompt] = useState(askSuggestions[1])
+  const [chatPrompt, setChatPrompt] = useState('')
   const [aiAnswer, setAiAnswer] = useState('')
   const [isAsking, setIsAsking] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [showTranslations, setShowTranslations] = useState(false)
-  const [aiSaveType, setAiSaveType] = useState<Exclude<NoteType, 'highlight' | 'videoBrief'>>('explanation')
+  const [aiSaveType, setAiSaveType] = useState<Exclude<NoteType, 'highlight' | 'thought'>>('explanation')
   const [showAiSaveOptions, setShowAiSaveOptions] = useState(false)
   const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
@@ -448,15 +610,17 @@ function App() {
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
   const [readerLeftWidth, setReaderLeftWidth] = useState<number | null>(null)
-  const [noteDraft, setNoteDraft] = useState(
-    'This passage matters because it reframes the design process as an adaptive learning loop.'
-  )
+  const [noteDraft, setNoteDraft] = useState('')
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([])
   const [chatRecords, setChatRecords] = useState<ChatRecord[]>([])
   const [toast, setToast] = useState<string | null>('Select text inside the transcript to ask AI or attach a note.')
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
+  const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
+  const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const selectionFloatRef = useRef<HTMLDivElement | null>(null)
+  const tagInputRef = useRef<HTMLInputElement | null>(null)
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
   const readerLayoutRef = useRef<HTMLDivElement | null>(null)
   const autoScrollResetRef = useRef<number | null>(null)
@@ -468,16 +632,24 @@ function App() {
   const detachedAtSegmentIndexRef = useRef<number | null>(null)
 
   const selectedVideo = findVideoById(videos, selectedVideoId)
+  const selectedVideoMeta = videoMeta[selectedVideo.id] ?? { status: 'inbox', isFavourite: false, tags: [] }
   const transcript = selectedVideo.transcript
   const selectedQuote = transcriptSelection?.quote ?? ''
   const selectedTimestamp = transcriptSelection?.timestamp ?? formatTime(selectedVideo.lastPositionSec)
-  const selectedNotes = savedNotes.filter((note) => note.videoId === selectedVideo.id)
+  const selectedNotes = savedNotes
+    .filter((note) => note.videoId === selectedVideo.id)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
   const allNotes = savedNotes
+  const visibleLibraryIds = libraryIds.filter((videoId) => {
+    const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+    return inboxTab === 'favourite' ? meta.isFavourite : meta.status === inboxTab
+  })
   const selectedChatRecords = chatRecords.filter((record) => record.videoId === selectedVideo.id)
   const activeSegmentIndex = transcript.findIndex(
     (segment) => currentPosition >= segment.startSec && currentPosition <= segment.endSec,
   )
   const selectedSegmentIds = transcriptSelection?.segmentIds ?? []
+  const chatContextQuote = chatContextSelection?.quote || selectedQuote
 
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
   const chatAnswer = aiAnswer || chatResponse
@@ -575,6 +747,7 @@ function App() {
         ]
 
         setVideos(mergedVideos)
+        setVideoMeta(initialVideoMeta(mergedVideos))
         setLibraryIds(mergedIds)
         setSavedNotes(persistedNotes)
         setChatRecords(persistedConversations)
@@ -757,6 +930,73 @@ function App() {
 
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (!showTagModal) return
+
+    const timer = window.setTimeout(() => {
+      tagInputRef.current?.focus()
+    }, 120)
+
+    return () => window.clearTimeout(timer)
+  }, [showTagModal])
+
+  useEffect(() => {
+    if (!transcriptSelection) return
+
+    const frame = window.requestAnimationFrame(() => {
+      const element = selectionFloatRef.current
+      if (!element) return
+
+      const rect = element.getBoundingClientRect()
+      const viewportPadding = 14
+      let nextX = transcriptSelection.x
+      let nextY = transcriptSelection.y
+
+      if (rect.right > window.innerWidth - viewportPadding) {
+        nextX -= rect.right - (window.innerWidth - viewportPadding)
+      }
+
+      if (rect.left < viewportPadding) {
+        nextX += viewportPadding - rect.left
+      }
+
+      if (rect.top < viewportPadding) {
+        nextY += viewportPadding - rect.top
+      }
+
+      if (Math.abs(nextX - transcriptSelection.x) > 1 || Math.abs(nextY - transcriptSelection.y) > 1) {
+        setTranscriptSelection((current) => current ? { ...current, x: nextX, y: nextY } : current)
+      }
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [transcriptSelection])
+
+  useEffect(() => {
+    function keepSelectionFloatInViewport() {
+      const element = selectionFloatRef.current
+      if (!element) return
+
+      const rect = element.getBoundingClientRect()
+      const viewportPadding = 14
+      let deltaX = 0
+
+      if (rect.right > window.innerWidth - viewportPadding) {
+        deltaX = window.innerWidth - viewportPadding - rect.right
+      } else if (rect.left < viewportPadding) {
+        deltaX = viewportPadding - rect.left
+      }
+
+      if (deltaX) {
+        setTranscriptSelection((current) => current ? { ...current, x: current.x + deltaX } : current)
+      }
+    }
+
+    window.addEventListener('resize', keepSelectionFloatInViewport)
+
+    return () => window.removeEventListener('resize', keepSelectionFloatInViewport)
+  }, [])
 
   useEffect(() => {
     if (screen !== 'reader') {
@@ -951,11 +1191,19 @@ function App() {
 
   function openReader(videoId: string) {
     const video = findVideoById(videos, videoId)
+    setVideoMeta((current) => ({
+      ...current,
+      [videoId]: {
+        ...(current[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }),
+        status: current[videoId]?.status === 'done' ? 'done' : 'learning',
+      },
+    }))
 
     startTransition(() => {
       setSelectedVideoId(videoId)
       setScreen('reader')
       setRightTab('subtitle')
+      setChatContextSelection(null)
       setIsTranscriptFollowing(true)
       setShowSyncPrompt(false)
       detachedAtSegmentIndexRef.current = null
@@ -1129,6 +1377,14 @@ function App() {
 
       const importedVideo = data as DemoVideo
       setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
+      setVideoMeta((current) => ({
+        ...current,
+        [importedVideo.id]: {
+          status: 'inbox',
+          isFavourite: false,
+          tags: [],
+        },
+      }))
       setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
       setSelectedVideoId(importedVideo.id)
       setCurrentPosition(importedVideo.lastPositionSec || importedVideo.transcript[0]?.startSec || 0)
@@ -1175,7 +1431,7 @@ function App() {
         body: JSON.stringify({
           video: selectedVideo,
           question: chatPrompt,
-          quote: selectedQuote,
+          quote: chatContextQuote,
           saveConversation: true,
         }),
       })
@@ -1344,56 +1600,22 @@ function App() {
       return
     }
 
+    const selection = transcriptSelection
+    if (selection) {
+      setChatContextSelection(selection)
+    }
     setChatPrompt(selectedQuote)
     setAiAnswer('')
     setShowAiSaveOptions(false)
     setRightTab('chat')
-    setToast('Highlight copied into chat. Add your question, then send.')
+    clearNativeSelection()
+    window.setTimeout(() => {
+      chatTextareaRef.current?.focus()
+    }, 80)
+    setToast('Selected subtitle is ready in the chat box.')
   }
 
-  async function saveNote(source: SavedNote['source'], type: NoteType = source === 'ai' ? aiSaveType : 'highlight') {
-    if (!selectedQuote) {
-      return
-    }
-
-    const isAiNote = source === 'ai'
-    const content = isAiNote ? chatAnswer : source === 'highlight' ? selectedQuote : noteDraft
-    const note: SavedNote = {
-      id: `${selectedVideo.id}-${selectedTimestamp}-${Date.now()}`,
-      videoId: selectedVideo.id,
-      videoTitle: selectedVideo.title,
-      quote: selectedQuote,
-      timestamp: selectedTimestamp,
-      note: content,
-      takeaway: isAiNote ? chatAnswer : buildTakeaway(selectedVideo, selectedQuote),
-      tags: ['video-learning', 'transcript', selectedVideo.channel.toLowerCase().replace(/\s+/g, '-')],
-      type,
-      originalSubtitle: selectedQuote,
-      content,
-      topics: selectedVideo.id === 'learn-faster' ? ['Product Thinking', 'Design'] : ['AI Agent', 'Product Thinking'],
-      createdAt: new Date().toISOString(),
-      source,
-    }
-
-    setSavedNotes((current) => [note, ...current])
-    setRightTab('note')
-    setShowNoteModal(false)
-    setShowAiSaveOptions(false)
-    clearNativeSelection()
-
-    if (isAiNote) {
-      setAiAnswer('')
-      setChatPrompt(askSuggestions[1])
-    }
-
-    const savedMessage =
-      source === 'ai'
-        ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
-        : source === 'highlight'
-          ? 'Saved as Highlight.'
-          : 'Saved note to notebook.'
-    setToast(savedMessage)
-
+  async function persistNote(note: SavedNote) {
     try {
       if (!supabase) {
         throw new Error('Supabase is not configured.')
@@ -1411,34 +1633,153 @@ function App() {
     }
   }
 
-  function handleExportMarkdown() {
-    const markdown = selectedNotes.length
-      ? [
-          `# ${selectedVideo.title}`,
-          '',
-          `Source: ${selectedVideo.channel}`,
-          '',
-          ...selectedNotes.flatMap((note) => [
-            `## ${note.timestamp}`,
-            '',
-            `> ${note.quote}`,
-            '',
-            `- Note: ${note.note}`,
-            `- Takeaway: ${note.takeaway}`,
-            `- Tags: ${note.tags.join(', ')}`,
-            '',
-          ]),
-        ].join('\n')
-      : '# No notes yet'
+  async function saveNote(source: SavedNote['source'], type: NoteType = source === 'ai' ? aiSaveType : 'highlight') {
+    const noteQuote = source === 'ai' ? chatContextQuote : selectedQuote
+    const noteTimestamp = source === 'ai' ? (chatContextSelection?.timestamp ?? selectedTimestamp) : selectedTimestamp
 
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
-    const url = window.URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'reader-video-notes.md'
-    anchor.click()
-    window.URL.revokeObjectURL(url)
-    setToast('Markdown exported.')
+    if (!noteQuote) {
+      return
+    }
+
+    const isAiNote = source === 'ai'
+    const content = isAiNote ? chatAnswer : source === 'highlight' ? noteQuote : noteDraft
+    const note: SavedNote = {
+      id: `${selectedVideo.id}-${noteTimestamp}-${Date.now()}`,
+      videoId: selectedVideo.id,
+      videoTitle: selectedVideo.title,
+      quote: noteQuote,
+      timestamp: noteTimestamp,
+      note: content,
+      takeaway: isAiNote ? chatAnswer : buildTakeaway(selectedVideo, noteQuote),
+      tags: selectedVideoMeta.tags,
+      type,
+      originalSubtitle: noteQuote,
+      content,
+      topics: selectedVideoMeta.tags,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      source,
+    }
+
+    setSavedNotes((current) => [note, ...current])
+    setVideoMeta((current) => ({
+      ...current,
+      [selectedVideo.id]: {
+        ...selectedVideoMeta,
+        status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
+      },
+    }))
+    setRightTab('note')
+    setShowNoteModal(false)
+    setShowAiSaveOptions(false)
+    clearNativeSelection()
+
+    if (isAiNote) {
+      setAiAnswer('')
+      setChatPrompt('')
+    }
+
+    const savedMessage =
+      source === 'ai'
+        ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
+        : source === 'highlight'
+          ? 'Saved as Highlight.'
+          : 'Saved as Thought.'
+    setToast(savedMessage)
+
+    await persistNote(note)
+  }
+
+  function openThoughtModal() {
+    if (!selectedQuote) {
+      setToast('Highlight transcript text first.')
+      return
+    }
+    setNoteDraft('')
+    setShowNoteModal(true)
+  }
+
+  function updateVideoMeta(videoId: string, patch: Partial<VideoMeta>) {
+    setVideoMeta((current) => {
+      const previous = current[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+      return {
+        ...current,
+        [videoId]: {
+          ...previous,
+          ...patch,
+        },
+      }
+    })
+  }
+
+  function openTagEditor(videoId: string) {
+    setTagModalVideoId(videoId)
+    setTagDraft('')
+    setShowTagModal(true)
+    setActiveVideoMenuId(null)
+  }
+
+  function addTagToVideo(tag: string) {
+    const videoId = tagModalVideoId
+    const cleanTag = tag.trim()
+    if (!videoId || !cleanTag) return
+
+    const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+    if (meta.tags.some((existing) => existing.toLowerCase() === cleanTag.toLowerCase())) {
+      setTagDraft('')
+      return
+    }
+    updateVideoMeta(videoId, { tags: [...meta.tags, cleanTag] })
+    setTagDraft('')
+  }
+
+  function removeTagFromVideo(videoId: string, tag: string) {
+    const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+    updateVideoMeta(videoId, { tags: meta.tags.filter((item) => item !== tag) })
+  }
+
+  function deleteVideo(videoId: string) {
+    setLibraryIds((current) => current.filter((id) => id !== videoId))
+    setVideos((current) => current.filter((video) => video.id !== videoId))
+    setSavedNotes((current) => current.filter((note) => note.videoId !== videoId))
+    setActiveVideoMenuId(null)
+    if (selectedVideoId === videoId) {
+      const nextId = libraryIds.find((id) => id !== videoId) ?? initialLibraryIds[0]
+      setSelectedVideoId(nextId)
+    }
+    setToast('Video deleted from this workspace.')
+  }
+
+  function updateNote(noteId: string, patch: Partial<SavedNote>) {
+    setSavedNotes((current) =>
+      current.map((note) =>
+        note.id === noteId
+          ? {
+              ...note,
+              ...patch,
+              updatedAt: new Date().toISOString(),
+            }
+          : note,
+      ),
+    )
+  }
+
+  function deleteNote(noteId: string) {
+    setSavedNotes((current) => current.filter((note) => note.id !== noteId))
+    setActiveNoteMenuId(null)
+    setToast('Note deleted.')
+  }
+
+  function editNoteContent(note: SavedNote) {
+    const nextContent = window.prompt('Edit note', note.content ?? note.note)
+    if (nextContent === null) return
+
+    updateNote(note.id, {
+      content: nextContent,
+      note: nextContent,
+    })
+    setActiveNoteMenuId(null)
+    setToast('Note updated.')
   }
 
   function renderChatThread(emptyDescription: string) {
@@ -1453,12 +1794,12 @@ function App() {
               <p>{record.answer}</p>
               {index === 0 && aiAnswer ? (
                 <div className="chat-card__actions chat-card__actions--stacked">
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!selectedQuote}>
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
                     Save to Notebook
                   </button>
                   {showAiSaveOptions ? (
                     <div className="save-type-picker">
-                      <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'videoBrief'>)}>
+                      <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
                         <option value="explanation">Save as Explanation</option>
                         <option value="keyIdea">Save as Key Idea</option>
                         <option value="reviewQuestion">Save as Review Question</option>
@@ -1488,7 +1829,7 @@ function App() {
     return (
       <div className="page-shell home-page">
         <section className="home-hero">
-          <p className="page-eyebrow">Deep YouTube Learning Workspace</p>
+          <p className="page-eyebrow">Vist / 观知</p>
           <h2>Learn deeply from YouTube videos</h2>
           <p>Paste a YouTube URL and turn it into notes, highlights, questions and review cards.</p>
           <form
@@ -1508,11 +1849,6 @@ function App() {
               {isImporting ? 'Importing...' : 'Start Learning'}
             </button>
           </form>
-          <div className="mode-pills">
-            {learningModes.map((mode) => (
-              <span key={mode}>{mode}</span>
-            ))}
-          </div>
         </section>
 
         <section className="page-section">
@@ -1551,71 +1887,33 @@ function App() {
           </div>
         </section>
 
-        <div className="home-columns">
-          <section className="page-section knowledge-card">
-            <div className="section-heading">
-              <div>
-                <p>My Knowledge Map</p>
-                <h3>知识正在从学习行为中长出来</h3>
-              </div>
-            </div>
-            <div className="topic-list">
-              {knowledgeTopics.map((topic) => (
-                <button key={topic.id} className="topic-row" type="button" onClick={() => setScreen('topics')}>
-                  <span>{topic.name}</span>
-                  <small>{topic.meta}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="page-section">
-            <div className="section-heading">
-              <div>
-                <p>Learning Discovery</p>
-                <h3>Editor’s picks for deep learning</h3>
-              </div>
-              <button className="text-button" type="button" onClick={() => setScreen('discover')}>
-                Explore
-              </button>
-            </div>
-            <div className="discovery-strip">
-              {discoveryItems.map((item) => (
-                <article key={item.id} className="mini-discovery-card">
-                  <strong>{item.title}</strong>
-                  <span>{item.signals}</span>
-                  <small>{item.concepts.join(' · ')}</small>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <section className="page-section">
+        <section className="page-section home-discovery-section">
           <div className="section-heading">
             <div>
-              <p>Recent Notes</p>
-              <h3>Latest learning artifacts saved from videos</h3>
+              <p>Discover</p>
+              <h3>Learning videos worth opening next</h3>
             </div>
-            <button className="text-button" type="button" onClick={() => setScreen('notes')}>
-              Open Notes
-            </button>
           </div>
-          <div className="note-preview-grid">
-            {allNotes.length ? (
-              allNotes.slice(0, 3).map((note) => (
-                <article key={note.id} className="global-note-card">
-                  <span>{noteTypeLabel(noteTypeFromSource(note))}</span>
-                  <strong>{note.videoTitle ?? findVideoById(videos, note.videoId).title}</strong>
-                  <p>{note.content ?? note.takeaway ?? note.note}</p>
-                </article>
-              ))
-            ) : (
-              <article className="empty-card">
-                <strong>No saved notes yet</strong>
-                <p>Highlight subtitles in a video, ask AI, then save the answer into your notebook.</p>
-              </article>
-            )}
+          <div className="home-discovery-waterfall">
+            {discoveryItems.map((item, index) => (
+              <button
+                key={item.id}
+                className="home-video-card"
+                type="button"
+                onClick={() => setShowAddModal(true)}
+              >
+                <div className="home-video-card__thumb" data-tone={index % 4}>
+                  <span>{item.duration}</span>
+                </div>
+                <div className="home-video-card__body">
+                  <strong>{item.title}</strong>
+                  <div>
+                    <span>{item.views} views</span>
+                    <span>{item.likes} likes</span>
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         </section>
       </div>
@@ -1623,173 +1921,133 @@ function App() {
   }
 
   function renderNotesPage() {
-    const noteTabs: Array<{ label: string; type?: NoteType }> = [
-      { label: 'All Notes' },
+    const noteTabs: Array<{ label: string; type: NoteType | 'all' }> = [
+      { label: 'All Notes', type: 'all' },
       { label: 'Highlights', type: 'highlight' },
+      { label: 'Thoughts', type: 'thought' },
       { label: 'Explanations', type: 'explanation' },
       { label: 'Key Ideas', type: 'keyIdea' },
       { label: 'Review Questions', type: 'reviewQuestion' },
-      { label: 'Video Briefs', type: 'videoBrief' },
     ]
+    const sourceNotes = allNotes.length ? allNotes : demoNotebookNotes
+    const noteVideoOptions = Array.from(
+      new Map(sourceNotes.map((note) => [note.videoId, note.videoTitle ?? findVideoById(videos, note.videoId).title])).entries(),
+    )
+    const noteTagOptions = Array.from(new Set(sourceNotes.flatMap((note) => note.tags))).sort((a, b) => a.localeCompare(b))
+    const visibleNotes = sourceNotes
+      .filter((note) => noteTypeFilter === 'all' || noteTypeFromSource(note) === noteTypeFilter)
+      .filter((note) => noteVideoFilter === 'all' || note.videoId === noteVideoFilter)
+      .filter((note) => noteTagFilter === 'all' || note.tags.includes(noteTagFilter))
+      .filter((note) => !noteStarredOnly || likedNoteIds.includes(note.id))
+      .sort((a, b) => {
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+
+        return noteSortOrder === 'newest' ? bTime - aTime : aTime - bTime
+      })
 
     return (
       <div className="page-shell">
         <div className="page-title">
-          <p>Global Notebook</p>
           <h2>Notes 全局笔记</h2>
-          <span>整理所有视频中沉淀出来的 Highlights、AI explanations、Key ideas 和 review questions。</span>
         </div>
         <div className="page-tabs">
           {noteTabs.map((tab) => (
-            <button key={tab.label} className="tabs__item tabs__item--soft" type="button">
+            <button
+              key={tab.label}
+              className={`tabs__item tabs__item--soft ${noteTypeFilter === tab.type ? 'tabs__item--active' : ''}`}
+              type="button"
+              onClick={() => setNoteTypeFilter(tab.type)}
+            >
               {tab.label}
             </button>
           ))}
         </div>
-        <div className="filter-bar">
-          <span>Video</span>
-          <span>Topic</span>
-          <span>Type</span>
-          <span>Date</span>
-          <button className="secondary-button" type="button" onClick={handleExportMarkdown}>Export Markdown</button>
+        <div className="note-filter-bar">
+          <label className="note-filter-control">
+            <span>Video:</span>
+            <select value={noteVideoFilter} onChange={(event) => setNoteVideoFilter(event.target.value)}>
+              <option value="all">All Videos</option>
+              {noteVideoOptions.map(([videoId, videoTitle]) => (
+                <option key={videoId} value={videoId}>{videoTitle}</option>
+              ))}
+            </select>
+            <ChevronDown size={16} />
+          </label>
+          <label className="note-filter-control">
+            <span>Tag:</span>
+            <select value={noteTagFilter} onChange={(event) => setNoteTagFilter(event.target.value)}>
+              <option value="all">All Tags</option>
+              {noteTagOptions.map((tag) => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+            <ChevronDown size={16} />
+          </label>
+          <label className="note-filter-check">
+            <input
+              type="checkbox"
+              checked={noteStarredOnly}
+              onChange={(event) => setNoteStarredOnly(event.target.checked)}
+            />
+            <span>Starred only</span>
+          </label>
+          <label className="note-filter-control">
+            <span>Sort:</span>
+            <select value={noteSortOrder} onChange={(event) => setNoteSortOrder(event.target.value as 'newest' | 'oldest')}>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+            </select>
+            <ChevronDown size={16} />
+          </label>
         </div>
-        <div className="global-note-list">
-          {allNotes.length ? (
-            allNotes.map((note) => (
+        <div className="global-note-list global-note-list--waterfall">
+          {visibleNotes.map((note) => {
+            const noteType = noteTypeFromSource(note)
+            const isHighlight = noteType === 'highlight'
+
+            return (
               <article key={note.id} className="global-note-card">
-                <span>{noteTypeLabel(noteTypeFromSource(note))} · {note.timestamp}</span>
-                <strong>{note.videoTitle ?? findVideoById(videos, note.videoId).title}</strong>
+                <div className="global-note-card__top">
+                  <span>{noteTypeLabel(noteType)} · {note.timestamp}</span>
+                  <button
+                    className="icon-button icon-button--ghost"
+                    type="button"
+                    aria-label="Note menu"
+                    onClick={() => setActiveNoteMenuId((current) => (current === note.id ? null : note.id))}
+                  >
+                    <MoreHorizontal size={18} />
+                  </button>
+                  {activeNoteMenuId === note.id ? (
+                    <div className="row-menu row-menu--note">
+                      <button type="button" onClick={() => openReader(note.videoId)}>Open video</button>
+                      <button type="button" onClick={() => deleteNote(note.id)}>Delete</button>
+                    </div>
+                  ) : null}
+                </div>
                 {note.originalSubtitle || note.quote ? <blockquote>{note.originalSubtitle ?? note.quote}</blockquote> : null}
-                <p>{note.content ?? note.takeaway ?? note.note}</p>
-                <small>{(note.topics ?? note.tags).join(' · ')}</small>
+                {!isHighlight ? <p>{note.content ?? note.takeaway ?? note.note}</p> : null}
+                <span className="global-note-card__source">{note.videoTitle ?? findVideoById(videos, note.videoId).title}</span>
+                <footer className="global-note-card__footer">
+                  <div className="tag-row tag-row--compact global-note-card__tags">
+                    {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
+                  </div>
+                  <button
+                    className={`note-like-button ${likedNoteIds.includes(note.id) ? 'note-like-button--active' : ''}`}
+                    type="button"
+                    aria-label="Like note"
+                    onClick={() => setLikedNoteIds((current) => (
+                      current.includes(note.id)
+                        ? current.filter((id) => id !== note.id)
+                        : [...current, note.id]
+                    ))}
+                  >
+                    <ThumbsUp size={15} />
+                  </button>
+                </footer>
               </article>
-            ))
-          ) : (
-            <article className="empty-card">
-              <strong>No notebook items yet</strong>
-              <p>Notes saved from Video Study will appear here as long-term learning assets.</p>
-            </article>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  function renderTopicsPage() {
-    return (
-      <div className="page-shell">
-        <div className="page-title">
-          <p>Knowledge Topics</p>
-          <h2>Topics 主题页</h2>
-          <span>Topics 不是手动标签，而是从视频、字幕划线和笔记中自然长出来的知识地图。</span>
-        </div>
-        <div className="topic-grid">
-          {knowledgeTopics.map((topic) => (
-            <article key={topic.id} className="topic-card">
-              <div>
-                <h3>{topic.name}</h3>
-                <span>{topic.meta}</span>
-              </div>
-              <div className="progress-line"><span style={{ width: `${topic.progress}%` }} /></div>
-              <ul>
-                {topic.ideas.map((idea) => <li key={idea}>{idea}</li>)}
-              </ul>
-              <div className="topic-actions">
-                <button className="secondary-button" type="button">Confirm</button>
-                <button className="secondary-button" type="button">Merge</button>
-                <button className="secondary-button" type="button">Rename</button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  function renderDiscoverPage() {
-    return (
-      <div className="page-shell">
-        <div className="page-title">
-          <p>Learning Discovery</p>
-          <h2>Discover 学习发现</h2>
-          <span>这里展示 Editor’s Pick / Newly Added / Recommended for Deep Learning，不用 YouTube 播放量替代学习信号。</span>
-        </div>
-        <div className="page-tabs">
-          {['全部', 'AI Agent', '产品', '创业', '设计', '英语', '认知科学', '技术', '商业'].map((tab) => (
-            <button key={tab} className="tabs__item tabs__item--soft" type="button">{tab}</button>
-          ))}
-        </div>
-        <div className="discover-grid">
-          {discoveryItems.map((item) => (
-            <article key={item.id} className="discover-card">
-              <div className="discover-card__cover">{item.channel}<span>{item.duration}</span></div>
-              <div className="discover-card__body">
-                <span>{item.difficulty}</span>
-                <h3>{item.title}</h3>
-                <p>{item.signals}</p>
-                <div className="mode-pills">
-                  {item.topics.map((topic) => <span key={topic}>{topic}</span>)}
-                </div>
-                <small>Core concepts: {item.concepts.join(', ')}</small>
-                <div className="topic-actions">
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAddModal(true)}>Start Learning</button>
-                  <button className="secondary-button" type="button" onClick={() => setScreen('notes')}>View Notes</button>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  function renderSearchPage() {
-    return (
-      <div className="page-shell">
-        <div className="page-title">
-          <p>Global Search</p>
-          <h2>Search 全局搜索</h2>
-          <span>搜索视频标题、频道、字幕、Notes、Highlights、Key Ideas、Review Questions 和 Topics。</span>
-        </div>
-        <div className="search-hero">
-          <Search size={20} />
-          <input placeholder="Search videos, subtitles, notes, topics..." />
-        </div>
-        <div className="search-groups">
-          {['Videos', 'Notes', 'Topics', 'Transcript Matches'].map((group) => (
-            <section key={group} className="page-section">
-              <p>{group}</p>
-              <article className="empty-card">
-                <strong>{group} results</strong>
-                <p>Search results will be grouped here once a query is entered.</p>
-              </article>
-            </section>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  function renderSettingsPage() {
-    return (
-      <div className="page-shell">
-        <div className="page-title">
-          <p>Workspace Settings</p>
-          <h2>Settings 设置</h2>
-          <span>管理导入、字幕、AI、导出和学习偏好。</span>
-        </div>
-        <div className="settings-grid">
-          {[
-            ['Default learning mode', 'Deep Summary + Transcript Notes'],
-            ['Subtitle language', 'Original + optional translation'],
-            ['AI provider', 'Kimi configured on Render'],
-            ['Export target', 'Markdown / Obsidian ready'],
-          ].map(([label, value]) => (
-            <article key={label} className="setting-card">
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </article>
-          ))}
+            )
+          })}
         </div>
       </div>
     )
@@ -1898,7 +2156,10 @@ function App() {
     <main className={`desktop-app ${screen === 'reader' ? 'desktop-app--reader' : ''}`}>
       <aside className="sidebar">
         <div className="sidebar__brand">
-          <h1>Reader</h1>
+          <h1>
+            <span>Vist</span>
+            <span>观知</span>
+          </h1>
         </div>
 
         <nav className="sidebar__main">
@@ -1921,21 +2182,44 @@ function App() {
           </div>
         </nav>
 
-        <div className="sidebar__footer">
-          <div className="account-card">
-            <UserCircle size={18} />
-            <div>
-              <strong>{currentUser.name}</strong>
-              <span>{currentUser.email}</span>
-            </div>
-            <button className="icon-button icon-button--ghost" type="button" onClick={() => void handleLogout()} aria-label="Log out">
-              <LogOut size={16} />
-            </button>
-          </div>
-          <button className={`nav-link nav-link--subtle ${screen === 'settings' ? 'nav-link--selected' : ''}`} type="button" onClick={() => setScreen('settings')}>
-            <Settings size={18} />
-            <span>Settings</span>
+        <div className="sidebar__account">
+          <button
+            className="account-button"
+            type="button"
+            aria-label="User menu"
+            aria-expanded={showUserMenu}
+            onClick={() => setShowUserMenu((current) => !current)}
+          >
+            <span className="account-button__avatar">
+              <UserCircle size={22} />
+            </span>
+            <span className="account-button__text">我的账户</span>
           </button>
+
+          {showUserMenu ? (
+            <div className="account-menu">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUserMenu(false)
+                  void handleLogout()
+                }}
+              >
+                <LogOut size={16} />
+                <span>退出登录</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUserMenu(false)
+                  setToast('联系我们：support@vist.example')
+                }}
+              >
+                <MessageCircle size={16} />
+                <span>联系我们</span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -1944,16 +2228,13 @@ function App() {
         <header className="workspace__topbar">
           <div className="workspace__group">
             <div className="library-title">
-              <button className="icon-button icon-button--ghost" type="button">
-                <Video size={18} />
-              </button>
               <strong>Videos</strong>
               <ChevronDown size={16} />
             </div>
 
             {screen === 'library' ? (
               <div className="tabs">
-                {(['inbox', 'learning', 'later', 'archive'] as InboxTab[]).map((tab) => (
+                {(['inbox', 'learning', 'done', 'favourite'] as LibraryTab[]).map((tab) => (
                   <button
                     key={tab}
                     className={`tabs__item ${inboxTab === tab ? 'tabs__item--active' : ''}`}
@@ -1975,27 +2256,10 @@ function App() {
                 <button className="icon-button icon-button--ghost" type="button">
                   <Video size={18} />
                 </button>
-                <button className="icon-button icon-button--ghost" type="button">
-                  <Globe size={18} />
-                </button>
               </div>
             )}
           </div>
 
-          <div className="workspace__group workspace__group--right">
-            <button className="date-filter" type="button">
-              <Clock3 size={18} />
-              <span>{screen === 'library' ? 'Date moved' : 'Sort by timestamp'}</span>
-              <ChevronDown size={16} />
-            </button>
-            <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAddModal(true)}>
-              <Plus size={18} />
-              <span>Add YouTube URL</span>
-            </button>
-            <button className="icon-button icon-button--mobile" type="button" onClick={() => setShowAddModal(true)} aria-label="Add YouTube URL">
-              <Plus size={18} />
-            </button>
-          </div>
         </header>
         ) : null}
 
@@ -2004,19 +2268,40 @@ function App() {
         ) : screen === 'library' ? (
           <div className="library-layout">
             <section className="list-pane">
+              {inboxTab === 'inbox' ? (
+                <div className="inbox-action-bar">
+                  <form
+                    className="inbox-import"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void handleImportUrl()
+                    }}
+                  >
+                    <input
+                      value={linkInput}
+                      onChange={(event) => setLinkInput(event.target.value)}
+                      placeholder="Paste YouTube URL..."
+                      disabled={isImporting}
+                    />
+                    <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
+                      {isImporting ? 'Importing...' : 'Start Learning'}
+                    </button>
+                  </form>
+                </div>
+              ) : null}
               <div className="rows">
-                {libraryIds.map((videoId, index) => {
+                {visibleLibraryIds.map((videoId, index) => {
                   const video = findVideoById(videos, videoId)
                   const isActive = video.id === selectedVideoId
+                  const meta = videoMeta[video.id] ?? { status: 'inbox', isFavourite: false, tags: [] }
                   const videoNotes = savedNotes.filter((note) => note.videoId === video.id)
                   const highlightCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length
                   const questionCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length
 
                   return (
-                    <button
+                    <article
                       key={video.id}
                       className={`library-row ${isActive ? 'library-row--active' : ''}`}
-                      type="button"
                       onClick={() => handleSelectRow(video.id)}
                       onDoubleClick={() => openReader(video.id)}
                     >
@@ -2027,9 +2312,42 @@ function App() {
                       <div className="library-row__content">
                         <div className="library-row__title-line">
                           <h3>{video.title}</h3>
-                          <span>{index === 0 ? '1:43 pm' : index === 1 ? '1:34 pm' : '1:30 pm'}</span>
+                          <div className="library-row__actions">
+                            <button
+                              className={`icon-button icon-button--ghost ${meta.isFavourite ? 'icon-button--favourite' : ''}`}
+                              type="button"
+                              aria-label={meta.isFavourite ? 'Unfavourite' : 'Favourite'}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                updateVideoMeta(video.id, { isFavourite: !meta.isFavourite })
+                              }}
+                            >
+                              <Star size={16} />
+                            </button>
+                            <button
+                              className="icon-button icon-button--ghost"
+                              type="button"
+                              aria-label="Video menu"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setActiveVideoMenuId((current) => (current === video.id ? null : video.id))
+                              }}
+                            >
+                              <MoreHorizontal size={18} />
+                            </button>
+                            {activeVideoMenuId === video.id ? (
+                              <div className="row-menu" onClick={(event) => event.stopPropagation()}>
+                                <button type="button" onClick={() => openTagEditor(video.id)}>Edit Tags</button>
+                                <button type="button" onClick={() => { updateVideoMeta(video.id, { status: 'done' }); setActiveVideoMenuId(null) }}>Mark as Done</button>
+                                <button type="button" onClick={() => { updateVideoMeta(video.id, { status: 'inbox' }); setActiveVideoMenuId(null) }}>Move to Inbox</button>
+                                <button type="button" onClick={() => { updateVideoMeta(video.id, { isFavourite: !meta.isFavourite }); setActiveVideoMenuId(null) }}>
+                                  {meta.isFavourite ? 'Unfavourite' : 'Favourite'}
+                                </button>
+                                <button type="button" onClick={() => deleteVideo(video.id)}>Delete</button>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                        <p>{buildSummary(video)}</p>
                         <div className="library-row__meta">
                           <span>{getHostnameLabel(video.youtubeUrl)}</span>
                           <span>{video.channel}</span>
@@ -2042,131 +2360,16 @@ function App() {
                           <span>Questions {Math.max(questionCount, index === 0 ? 5 : 2)}</span>
                           <span>{index === 0 ? 'today' : index === 1 ? 'today' : 'yesterday'}</span>
                         </div>
+                        <div className="tag-row">
+                          {meta.tags.length ? meta.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
+                        </div>
                       </div>
-                    </button>
+                    </article>
                   )
                 })}
               </div>
             </section>
 
-            <aside className="right-pane">
-              <div className="right-pane__tabs">
-                {(['info', 'note', 'chat'] as RightTab[]).map((tab) => (
-                  <button
-                    key={tab}
-                    className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
-                    type="button"
-                    onClick={() => setRightTab(tab)}
-                  >
-                    {tab}
-                    {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
-                  </button>
-                ))}
-              </div>
-
-              {rightTab === 'info' ? (
-                <div className="detail-panel">
-                  <h2>{selectedVideo.title}</h2>
-                  <span className="detail-panel__domain">{getHostnameLabel(selectedVideo.youtubeUrl)}</span>
-
-                  <div className="author-card">
-                    <div className="author-card__avatar">{selectedVideo.channel.slice(0, 1)}</div>
-                    <div>
-                      <strong>{selectedVideo.channel}</strong>
-                      <p>@{handleFromChannel(selectedVideo.channel)}</p>
-                    </div>
-                  </div>
-
-                  <section className="meta-section">
-                    <p>Summary</p>
-                    <div className="summary-card">{buildSummary(selectedVideo)}</div>
-                  </section>
-
-                  <section className="meta-section">
-                    <p>Metadata</p>
-                    <dl className="metadata-list">
-                      <div><dt>Type</dt><dd>Video</dd></div>
-                      <div><dt>Domain</dt><dd>{getHostnameLabel(selectedVideo.youtubeUrl)}</dd></div>
-                      <div><dt>Length</dt><dd>{selectedVideo.durationLabel}</dd></div>
-                      <div><dt>Saved</dt><dd>about 2 hours ago</dd></div>
-                      <div><dt>Progress</dt><dd>{Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</dd></div>
-                      <div><dt>Notes</dt><dd>{selectedNotes.length}</dd></div>
-                      <div><dt>Highlights</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</dd></div>
-                      <div><dt>Questions</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</dd></div>
-                    </dl>
-                  </section>
-
-                  <section className="meta-section">
-                    <p>Suggested Topics</p>
-                    <div className="mode-pills mode-pills--left">
-                      {(selectedVideo.id === 'learn-faster' ? ['Design', 'Product Thinking'] : ['AI Agent', 'Product Thinking']).map((topic) => <span key={topic}>{topic}</span>)}
-                    </div>
-                    <button className="secondary-button" type="button" onClick={() => setToast('Learning Brief generation is queued for the next AI pass.')}>
-                      Generate Learning Brief
-                    </button>
-                  </section>
-                </div>
-              ) : null}
-
-              {rightTab === 'note' ? (
-                <div className="detail-panel">
-                  <section className="meta-section">
-                    <p>Notebook</p>
-                    <div className="notebook-actions">
-                      <button className="secondary-button" type="button" onClick={handleExportMarkdown}>
-                        Export Markdown
-                      </button>
-                    </div>
-                  </section>
-
-                  <div className="note-stack">
-                    {selectedNotes.length ? (
-                      selectedNotes.map((note) => (
-                        <article key={note.id} className="note-card">
-                          <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
-                          <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
-                          <p>{note.content ?? note.note}</p>
-                          <small>{(note.topics ?? note.tags).join(' · ')}</small>
-                        </article>
-                      ))
-                    ) : (
-                      <article className="empty-card">
-                        <strong>No notes yet</strong>
-                        <p>Highlight part of the transcript and save a note to populate this notebook.</p>
-                      </article>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {rightTab === 'chat' ? (
-                <div className="detail-panel detail-panel--chat">
-                  <div className="chat-suggestions">
-                    {askSuggestions.map((suggestion) => (
-                      <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
-
-                  {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
-
-                  <section className="meta-section chat-composer-section">
-                    <p>Chat</p>
-                    <div className="chat-composer">
-                      <textarea
-                        value={chatPrompt}
-                        onChange={(event) => setChatPrompt(event.target.value)}
-                        placeholder="Ask about this video, or highlight transcript text and choose Ask AI."
-                      />
-                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskAi} disabled={isAsking}>
-                        {isAsking ? 'Sending...' : 'Send'}
-                      </button>
-                    </div>
-                  </section>
-                </div>
-              ) : null}
-            </aside>
           </div>
         ) : screen === 'reader' ? (
 	          <div
@@ -2229,14 +2432,9 @@ function App() {
                 </article>
 
                 <section className="study-goal-card">
-                  <p>当前学习目标</p>
-                  <strong>看一段字幕 → Ask AI 问懂 → Save to Notebook 选择保存类型 → 清空 Chat 继续下一段。</strong>
-                  <div>
-                    <span>Progress {Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</span>
-                    <span>Notes {selectedNotes.length}</span>
-                    <span>Highlights {selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</span>
-                    <span>Questions {selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</span>
-                  </div>
+                  <p>每日金句</p>
+                  <blockquote>Learning never exhausts the mind.</blockquote>
+                  <cite>Leonardo da Vinci</cite>
                 </section>
               </div>
             </section>
@@ -2329,13 +2527,10 @@ function App() {
                   </section>
 
                   <section className="meta-section">
-                    <p>Suggested Topics</p>
-                    <div className="mode-pills mode-pills--left">
-                      {(selectedVideo.id === 'learn-faster' ? ['Design', 'Product Thinking'] : ['AI Agent', 'Product Thinking']).map((topic) => <span key={topic}>{topic}</span>)}
+                    <p>Manual Tags</p>
+                    <div className="tag-row tag-row--compact">
+                      {selectedVideoMeta.tags.length ? selectedVideoMeta.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
                     </div>
-                    <button className="secondary-button" type="button" onClick={() => setToast('Learning Brief generation is queued for the next AI pass.')}>
-                      Generate Learning Brief
-                    </button>
                   </section>
                 </div>
               ) : null}
@@ -2344,11 +2539,6 @@ function App() {
                 <div className="detail-panel">
                   <section className="meta-section">
                     <p>Notebook</p>
-                    <div className="notebook-actions">
-                      <button className="secondary-button" type="button" onClick={handleExportMarkdown}>
-                        Export Markdown
-                      </button>
-                    </div>
                   </section>
 
                   <div className="note-stack">
@@ -2358,7 +2548,14 @@ function App() {
                           <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
                           <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
                           <p>{note.content ?? note.note}</p>
-                          <small>{(note.topics ?? note.tags).join(' · ')}</small>
+                          <div className="tag-row tag-row--compact">
+                            {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
+                          </div>
+                          <div className="note-card__actions">
+                            <button className="text-button" type="button" onClick={() => handleSeek(Number(note.timestamp.split(':')[0]) * 60 + Number(note.timestamp.split(':')[1] ?? 0))}>Jump</button>
+                            <button className="text-button" type="button" onClick={() => editNoteContent(note)}>Edit</button>
+                            <button className="text-button" type="button" onClick={() => deleteNote(note.id)}>Delete</button>
+                          </div>
                         </article>
                       ))
                     ) : (
@@ -2373,18 +2570,19 @@ function App() {
 
               {rightTab === 'chat' ? (
                 <div className="detail-panel detail-panel--chat">
-                  {selectedQuote ? (
+                  {chatContextQuote ? (
                     <section className="chat-context-card">
                       <span>Context from subtitle</span>
-                      <p>{selectedQuote}</p>
+                      <p>{chatContextQuote}</p>
                     </section>
                   ) : null}
 
                   <p className="panel-kicker">Suggested prompts</p>
                   <div className="chat-suggestions">
                     {askSuggestions.map((suggestion) => (
-                      <button key={suggestion} className="chip-button" type="button" onClick={() => setChatPrompt(suggestion)}>
-                        {suggestion}
+                      <button key={suggestion} className="chip-button chip-button--prompt" type="button" onClick={() => setChatPrompt(suggestion)}>
+                        <Sparkles size={14} />
+                        <span>{suggestion}</span>
                       </button>
                     ))}
                   </div>
@@ -2395,6 +2593,7 @@ function App() {
                     <p>Ask about this video</p>
                     <div className="chat-composer">
                       <textarea
+                        ref={chatTextareaRef}
                         value={chatPrompt}
                         onChange={(event) => setChatPrompt(event.target.value)}
                         placeholder="Ask about this video, or highlight transcript text and choose Ask AI."
@@ -2424,7 +2623,15 @@ function App() {
                       {transcript.length === 0 ? (
                         <article className="empty-card">
                           <strong>No transcript found</strong>
-                          <p>This YouTube video was imported, but captions were not available from the public transcript endpoint.</p>
+                          <p>This video was imported, but captions were not available from the public transcript endpoint.</p>
+                          <div className="empty-card__actions">
+                            <button className="secondary-button" type="button" onClick={() => window.open(selectedVideo.youtubeUrl, '_blank', 'noopener,noreferrer')}>
+                              Open in YouTube
+                            </button>
+                            <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAddModal(true)}>
+                              Import another video
+                            </button>
+                          </div>
                         </article>
                       ) : null}
                       {transcript.map((segment, index) => {
@@ -2458,35 +2665,33 @@ function App() {
           </div>
         ) : screen === 'notes' ? (
           renderNotesPage()
-        ) : screen === 'topics' ? (
-          renderTopicsPage()
-        ) : screen === 'discover' ? (
-          renderDiscoverPage()
-        ) : screen === 'search' ? (
-          renderSearchPage()
         ) : (
-          renderSettingsPage()
+          renderHomePage()
         )}
       </section>
 
       <AnimatePresence>
         {transcriptSelection ? (
           <motion.div
+            ref={selectionFloatRef}
             className="selection-float"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             style={{ left: transcriptSelection.x, top: transcriptSelection.y }}
           >
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight', 'highlight')}>
+              Save to Notebook
+            </button>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={openThoughtModal}>
+              Add Thought
+            </button>
             <button
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={handleAskSelectedQuote}
             >
               {isAsking ? 'Asking...' : 'Ask AI'}
-            </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight', 'highlight')}>
-              Save to Notebook
             </button>
             <button className="selection-float__ghost" type="button" onClick={clearNativeSelection}>
               <X size={16} />
@@ -2532,7 +2737,7 @@ function App() {
           <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="note-modal" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
               <div className="note-modal__header">
-                <strong>Add note</strong>
+                <strong>Add your thought</strong>
                 <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowNoteModal(false)}>
                   <X size={18} />
                 </button>
@@ -2545,14 +2750,75 @@ function App() {
                 <textarea
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="Write your thought about this passage..."
                   rows={6}
                 />
                 <div className="note-modal__actions">
                   <button className="secondary-button" type="button" onClick={() => setShowNoteModal(false)}>
                     Cancel
                   </button>
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('manual')}>
-                    Save note
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('thought', 'thought')}>
+                    Save Thought
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTagModal && tagModalVideoId ? (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="note-modal tag-modal" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
+              <div className="note-modal__header">
+                <strong>Edit Tags</strong>
+                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowTagModal(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="note-modal__body">
+                <div className="tag-row">
+                  {(videoMeta[tagModalVideoId]?.tags ?? []).length ? (
+                    videoMeta[tagModalVideoId].tags.map((tag) => (
+                      <button key={tag} className="tag-pill-button" type="button" onClick={() => removeTagFromVideo(tagModalVideoId, tag)}>
+                        {tag} <X size={12} />
+                      </button>
+                    ))
+                  ) : (
+                    <span>No tags</span>
+                  )}
+                </div>
+                <form
+                  className="tag-add-row"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    addTagToVideo(tagDraft)
+                  }}
+                >
+                  <label htmlFor="custom-tag-input">Custom tag</label>
+                  <input
+                    ref={tagInputRef}
+                    id="custom-tag-input"
+                    value={tagDraft}
+                    onChange={(event) => setTagDraft(event.target.value)}
+                    placeholder="Type a tag and press Enter"
+                  />
+                  <button className="secondary-button" type="submit" disabled={!tagDraft.trim()}>Add</button>
+                </form>
+                <div className="common-tag-grid">
+                  {commonTags.map((tag) => (
+                    <button key={tag} className="chip-button" type="button" onClick={() => addTagToVideo(tag)}>
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+                <div className="note-modal__actions">
+                  <button className="secondary-button" type="button" onClick={() => setShowTagModal(false)}>
+                    Cancel
+                  </button>
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowTagModal(false)}>
+                    Save
                   </button>
                 </div>
               </div>
