@@ -24,6 +24,9 @@ export type DemoVideo = {
   coverEyebrow: string
   coverTitle: string
   coverDetail: string
+  status?: 'inbox' | 'learning' | 'done'
+  isFavourite?: boolean
+  tags?: string[]
   transcript: TranscriptSegment[]
 }
 
@@ -128,6 +131,9 @@ export const catalogVideos: DemoVideo[] = [
     coverEyebrow: 'Cat Wu · Head of Product, Claude Code',
     coverTitle: "How Anthropic's product team moves faster",
     coverDetail: 'A more realistic long-form interview cover inspired by your reference',
+    status: 'learning',
+    isFavourite: true,
+    tags: ['AI Agent', 'Product'],
     transcript: jennyTranscript
   },
   {
@@ -147,6 +153,9 @@ export const catalogVideos: DemoVideo[] = [
     coverEyebrow: 'Jenny Wen · Head of Design at Claude',
     coverTitle: 'The design process is dead',
     coverDetail: 'A more realistic interview cover for the second reference video',
+    status: 'learning',
+    isFavourite: false,
+    tags: ['Design', 'Product'],
     transcript: learningTranscript.map((segment, index) => ({
       ...segment,
       id: `jd-${index + 1}`,
@@ -175,6 +184,9 @@ export const catalogVideos: DemoVideo[] = [
     coverEyebrow: 'Narrative strategy',
     coverTitle: 'Tell the product story',
     coverDetail: 'Positioning, framing, and memorable examples',
+    status: 'inbox',
+    isFavourite: false,
+    tags: ['Startup'],
     transcript: [
       {
         id: 'ps-1',
@@ -215,8 +227,8 @@ export const importExamples = [
 ]
 
 export const askSuggestions = [
-  'Give me the key idea in plain English',
+  'Explain this in simple English',
   'What is the speaker really arguing here?',
-  'Turn this into three reusable study notes',
+  'Turn this into reusable study notes',
   'What should I remember one week later?'
 ]
