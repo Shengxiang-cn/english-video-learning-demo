@@ -748,6 +748,11 @@ function App() {
 
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
   const chatAnswer = aiAnswer || chatResponse
+  const shouldShowChatSuggestions =
+    !chatPrompt.trim() &&
+    !isAsking &&
+    !aiAnswer &&
+    selectedChatRecords.length === 0
 
   async function getAccessToken() {
     if (!supabase) {
@@ -2830,22 +2835,19 @@ function App() {
 
               {rightTab === 'chat' ? (
                 <div className="detail-panel detail-panel--chat">
-                  {chatContextQuote ? (
-                    <section className="chat-context-card">
-                      <span>Context from subtitle</span>
-                      <p>{chatContextQuote}</p>
-                    </section>
+                  {shouldShowChatSuggestions ? (
+                    <>
+                      <p className="panel-kicker">Suggested prompts</p>
+                      <div className="chat-suggestions">
+                        {askSuggestions.map((suggestion) => (
+                          <button key={suggestion} className="chip-button chip-button--prompt" type="button" onClick={() => setChatPrompt(suggestion)}>
+                            <Sparkles size={14} />
+                            <span>{suggestion}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   ) : null}
-
-                  <p className="panel-kicker">Suggested prompts</p>
-                  <div className="chat-suggestions">
-                    {askSuggestions.map((suggestion) => (
-                      <button key={suggestion} className="chip-button chip-button--prompt" type="button" onClick={() => setChatPrompt(suggestion)}>
-                        <Sparkles size={14} />
-                        <span>{suggestion}</span>
-                      </button>
-                    ))}
-                  </div>
 
                   {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
 
