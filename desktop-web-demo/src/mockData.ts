@@ -27,6 +27,7 @@ export type DemoVideo = {
   status?: 'inbox' | 'learning' | 'done'
   isFavourite?: boolean
   tags?: string[]
+  savedAt?: string
   transcript: TranscriptSegment[]
 }
 

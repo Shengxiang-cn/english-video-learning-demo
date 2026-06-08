@@ -5,6 +5,7 @@ import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
+import WebSocket from 'ws'
 import { fetchYouTubeTranscript } from './youtube-transcript-provider.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -18,11 +19,14 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABA
 const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 const supabaseAuth = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    realtime: {
+      transport: WebSocket,
+    },
+  })
   : null
 
 const videosTable = 'learning_videos'
@@ -74,6 +78,9 @@ function requestSupabase(req) {
       autoRefreshToken: false,
       persistSession: false,
     },
+    realtime: {
+      transport: WebSocket,
+    },
     global: {
       headers: {
         Authorization: `Bearer ${req.accessToken}`,
@@ -107,6 +114,9 @@ function videoToRow(video, userId) {
     transcript_languages: video.transcriptLanguages ?? [],
     transcript_error: video.transcriptError ?? null,
     transcript: video.transcript ?? [],
+    status: video.status ?? 'inbox',
+    is_favourite: Boolean(video.isFavourite),
+    tags: video.tags ?? [],
     saved_at: video.savedAt ?? new Date().toISOString(),
   }
 }
@@ -135,6 +145,9 @@ function rowToVideo(row) {
     transcriptLanguages: row.transcript_languages ?? [],
     transcriptError: row.transcript_error,
     transcript: row.transcript ?? [],
+    status: row.status ?? (row.last_position_sec > 0 ? 'learning' : 'inbox'),
+    isFavourite: Boolean(row.is_favourite),
+    tags: row.tags ?? [],
     savedAt: row.saved_at,
   }
 }
@@ -155,6 +168,7 @@ function noteToRow(note, userId) {
     content: note.content ?? null,
     topics: note.topics ?? [],
     source: note.source,
+    is_starred: Boolean(note.isStarred),
     created_at: note.createdAt ?? new Date().toISOString(),
     saved_at: note.savedAt ?? new Date().toISOString(),
   }
@@ -176,6 +190,7 @@ function rowToNote(row) {
     topics: row.topics ?? [],
     createdAt: row.created_at,
     savedAt: row.saved_at,
+    isStarred: Boolean(row.is_starred),
     source: row.source,
   }
 }

@@ -31,7 +31,7 @@ type Screen = 'home' | 'library' | 'reader' | 'notes'
 type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
 type InboxTab = 'inbox' | 'learning' | 'done'
 type LibraryTab = InboxTab | 'favourite'
-type NoteType = 'highlight' | 'thought' | 'explanation' | 'keyIdea' | 'reviewQuestion'
+type NoteType = 'highlight' | 'thought' | 'explanation' | 'keyIdea' | 'reviewQuestion' | 'videoBrief'
 type VideoMeta = {
   status: InboxTab
   isFavourite: boolean
@@ -61,6 +61,7 @@ type SavedNote = {
   createdAt?: string
   updatedAt?: string
   savedAt?: string
+  isStarred?: boolean
   source: 'thought' | 'manual' | 'ai' | 'highlight'
 }
 
@@ -97,6 +98,9 @@ type LearningVideoRow = {
   transcript_languages?: unknown
   transcript_error?: unknown
   transcript: DemoVideo['transcript']
+  status?: InboxTab | null
+  is_favourite?: boolean | null
+  tags?: unknown
   saved_at?: string
 }
 
@@ -108,14 +112,25 @@ type LearningNoteRow = {
   timestamp_label: string
   note: string
   takeaway: string
-  tags?: string[] | null
+  tags?: unknown
   type?: NoteType | null
   original_subtitle?: string | null
   content?: string | null
-  topics?: string[] | null
+  topics?: unknown
   created_at?: string
   saved_at?: string
+  is_starred?: boolean | null
   source: SavedNote['source']
+}
+
+type LearningTranslationRow = {
+  user_id?: string
+  video_id: string
+  language: string
+  segments?: unknown
+  status?: 'partial' | 'ready' | 'failed'
+  created_at?: string
+  updated_at?: string
 }
 
 type LearningConversationRow = {
@@ -148,6 +163,8 @@ type TranslationStatus = {
   failed: TranslationBatch[]
   lastError: string
 }
+
+const defaultVideoMeta: VideoMeta = { status: 'inbox', isFavourite: false, tags: [] }
 
 const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Video }> = [
   { label: 'Home', screen: 'home', icon: HomeIcon },
@@ -414,6 +431,7 @@ function noteTypeLabel(type?: NoteType) {
     explanation: 'Explanation',
     keyIdea: 'Key Idea',
     reviewQuestion: 'Review Question',
+    videoBrief: 'Video Brief',
   }
 
   return labels[type ?? 'highlight']
@@ -428,11 +446,7 @@ function noteTypeFromSource(note: SavedNote): NoteType {
 
 function initialVideoMeta(videos: DemoVideo[]) {
   return videos.reduce<Record<string, VideoMeta>>((acc, video) => {
-    acc[video.id] = {
-      status: video.status ?? (video.lastPositionSec > 0 ? 'learning' : 'inbox'),
-      isFavourite: Boolean(video.isFavourite),
-      tags: video.tags ?? [],
-    }
+    acc[video.id] = videoMetaFromVideo(video)
     return acc
   }, {})
 }
@@ -483,6 +497,50 @@ function translationKey(videoId: string, language: string, segmentId: string) {
   return `${videoId}:${language}:${segmentId}`
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function normalizedStatus(status: unknown, fallback: InboxTab = 'inbox'): InboxTab {
+  return status === 'inbox' || status === 'learning' || status === 'done' ? status : fallback
+}
+
+function videoMetaFromVideo(video: DemoVideo): VideoMeta {
+  return {
+    status: normalizedStatus(video.status, video.lastPositionSec > 0 ? 'learning' : 'inbox'),
+    isFavourite: Boolean(video.isFavourite),
+    tags: video.tags ?? [],
+  }
+}
+
+function videoToRow(video: DemoVideo, userId: string, meta: VideoMeta = videoMetaFromVideo(video)): LearningVideoRow & { user_id: string } {
+  return {
+    id: video.id,
+    user_id: userId,
+    title: video.title,
+    channel: video.channel,
+    duration_label: video.durationLabel,
+    duration_sec: video.durationSec,
+    last_position_sec: video.lastPositionSec,
+    last_position_label: video.lastPositionLabel,
+    summary: video.summary,
+    youtube_url: video.youtubeUrl,
+    youtube_id: video.youtubeId ?? null,
+    source_type: video.sourceType ?? 'youtube',
+    accent: video.accent,
+    cover_image: video.coverImage ?? null,
+    player_image: video.playerImage ?? null,
+    cover_eyebrow: video.coverEyebrow,
+    cover_title: video.coverTitle,
+    cover_detail: video.coverDetail,
+    transcript: video.transcript ?? [],
+    status: meta.status,
+    is_favourite: meta.isFavourite,
+    tags: meta.tags,
+    saved_at: video.savedAt ?? new Date().toISOString(),
+  }
+}
+
 function rowToVideo(row: LearningVideoRow): DemoVideo {
   return {
     id: row.id,
@@ -502,7 +560,11 @@ function rowToVideo(row: LearningVideoRow): DemoVideo {
     coverEyebrow: row.cover_eyebrow,
     coverTitle: row.cover_title,
     coverDetail: row.cover_detail,
+    status: normalizedStatus(row.status, row.last_position_sec > 0 ? 'learning' : 'inbox'),
+    isFavourite: Boolean(row.is_favourite),
+    tags: stringArray(row.tags),
     transcript: row.transcript ?? [],
+    savedAt: row.saved_at,
   }
 }
 
@@ -523,6 +585,7 @@ function noteToRow(note: SavedNote, userId?: string) {
     topics: note.topics ?? [],
     created_at: note.createdAt ?? new Date().toISOString(),
     saved_at: note.savedAt ?? new Date().toISOString(),
+    is_starred: Boolean(note.isStarred),
     source: note.source,
   }
 }
@@ -536,12 +599,14 @@ function rowToNote(row: LearningNoteRow): SavedNote {
     timestamp: row.timestamp_label,
     note: row.note,
     takeaway: row.takeaway,
-    tags: row.tags ?? [],
+    tags: stringArray(row.tags),
     type: row.type ?? undefined,
     originalSubtitle: row.original_subtitle ?? undefined,
     content: row.content ?? undefined,
-    topics: row.topics ?? [],
+    topics: stringArray(row.topics),
     createdAt: row.created_at,
+    savedAt: row.saved_at,
+    isStarred: Boolean(row.is_starred),
     source: row.source,
   }
 }
@@ -556,6 +621,37 @@ function rowToChatRecord(row: LearningConversationRow): ChatRecord {
     answer: row.answer,
     createdAt: row.created_at,
   }
+}
+
+function rowsToTranslatedSegments(rows: LearningTranslationRow[]) {
+  return rows.reduce<Record<string, string>>((acc, row) => {
+    const segments = row.segments
+    if (!segments || Array.isArray(segments) || typeof segments !== 'object') {
+      return acc
+    }
+
+    Object.entries(segments as Record<string, unknown>).forEach(([segmentId, text]) => {
+      if (typeof text === 'string') {
+        acc[translationKey(row.video_id, row.language, segmentId)] = text
+      }
+    })
+
+    return acc
+  }, {})
+}
+
+function translationSegmentsForVideo(
+  translatedSegments: Record<string, string>,
+  videoId: string,
+  language: string,
+) {
+  return Object.entries(translatedSegments).reduce<Record<string, string>>((acc, [key, value]) => {
+    const prefix = `${videoId}:${language}:`
+    if (key.startsWith(prefix)) {
+      acc[key.slice(prefix.length)] = value
+    }
+    return acc
+  }, {})
 }
 
 function App() {
@@ -584,7 +680,6 @@ function App() {
   const [tagDraft, setTagDraft] = useState('')
   const [activeVideoMenuId, setActiveVideoMenuId] = useState<string | null>(null)
   const [activeNoteMenuId, setActiveNoteMenuId] = useState<string | null>(null)
-  const [likedNoteIds, setLikedNoteIds] = useState<string[]>([])
   const [noteTypeFilter, setNoteTypeFilter] = useState<NoteType | 'all'>('all')
   const [noteVideoFilter, setNoteVideoFilter] = useState('all')
   const [noteTagFilter, setNoteTagFilter] = useState('all')
@@ -632,7 +727,7 @@ function App() {
   const detachedAtSegmentIndexRef = useRef<number | null>(null)
 
   const selectedVideo = findVideoById(videos, selectedVideoId)
-  const selectedVideoMeta = videoMeta[selectedVideo.id] ?? { status: 'inbox', isFavourite: false, tags: [] }
+  const selectedVideoMeta = videoMeta[selectedVideo.id] ?? defaultVideoMeta
   const transcript = selectedVideo.transcript
   const selectedQuote = transcriptSelection?.quote ?? ''
   const selectedTimestamp = transcriptSelection?.timestamp ?? formatTime(selectedVideo.lastPositionSec)
@@ -698,6 +793,7 @@ function App() {
       if (!session?.user) {
         setSavedNotes([])
         setChatRecords([])
+        setTranslatedSegments({})
       }
     })
 
@@ -721,13 +817,14 @@ function App() {
       }
 
       try {
-        const [videosResult, notesResult, conversationsResult] = await Promise.all([
+        const [videosResult, notesResult, conversationsResult, translationsResult] = await Promise.all([
           supabase.from('learning_videos').select('*').order('saved_at', { ascending: false }),
           supabase.from('learning_notes').select('*').order('saved_at', { ascending: false }),
           supabase.from('learning_conversations').select('*').order('created_at', { ascending: false }),
+          supabase.from('learning_translations').select('*'),
         ])
 
-        const error = videosResult.error ?? notesResult.error ?? conversationsResult.error
+        const error = videosResult.error ?? notesResult.error ?? conversationsResult.error ?? translationsResult.error
         if (error) throw error
 
         if (!isMounted) {
@@ -737,6 +834,7 @@ function App() {
         const persistedVideos = ((videosResult.data ?? []) as LearningVideoRow[]).map(rowToVideo)
         const persistedNotes = ((notesResult.data ?? []) as LearningNoteRow[]).map(rowToNote)
         const persistedConversations = ((conversationsResult.data ?? []) as LearningConversationRow[]).map(rowToChatRecord)
+        const persistedTranslations = rowsToTranslatedSegments((translationsResult.data ?? []) as LearningTranslationRow[])
         const mergedVideos = [
           ...persistedVideos,
           ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
@@ -751,6 +849,7 @@ function App() {
         setLibraryIds(mergedIds)
         setSavedNotes(persistedNotes)
         setChatRecords(persistedConversations)
+        setTranslatedSegments(persistedTranslations)
 
         if (persistedVideos.length > 0) {
           setSelectedVideoId(persistedVideos[0].id)
@@ -893,18 +992,31 @@ function App() {
     const timer = window.setTimeout(async () => {
       try {
         const safePosition = Math.max(0, Math.round(currentPosition))
+        const nextVideo: DemoVideo = {
+          ...selectedVideo,
+          lastPositionSec: safePosition,
+          lastPositionLabel: safePosition > 0 ? `Continue at ${formatTime(safePosition)}` : 'Not started',
+        }
         const { data, error } = await supabaseClient
           .from('learning_videos')
-          .update({
-            last_position_sec: safePosition,
-            last_position_label: safePosition > 0 ? `Continue at ${formatTime(safePosition)}` : 'Not started',
-            last_watched_at: new Date().toISOString(),
-          })
-          .eq('id', selectedVideo.id)
+          .upsert(
+            {
+              ...videoToRow(nextVideo, currentUser.id, selectedVideoMeta),
+              last_watched_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id,id' },
+          )
           .select('*')
           .maybeSingle()
 
-        if (error || !data) {
+        if (error) {
+          setToast('Failed to save video progress.')
+          return
+        }
+
+        if (!data) {
+          setToast('Failed to save video progress.')
           return
         }
 
@@ -912,12 +1024,12 @@ function App() {
         lastSavedProgressRef.current[selectedVideo.id] = updatedVideo.lastPositionSec
         setVideos((current) => current.map((video) => (video.id === updatedVideo.id ? { ...video, ...updatedVideo } : video)))
       } catch {
-        // Progress persistence is opportunistic; playback should never be interrupted by it.
+        setToast('Failed to save video progress.')
       }
     }, 900)
 
     return () => window.clearTimeout(timer)
-  }, [currentPosition, currentUser, screen, selectedVideo])
+  }, [currentPosition, currentUser, screen, selectedVideo, selectedVideoMeta])
 
   useEffect(() => {
     if (!toast) {
@@ -1068,8 +1180,9 @@ function App() {
       const transcript = transcriptContentRef.current
       const actionDock = document.querySelector('.transcript-action-dock')
       const selectionFloat = document.querySelector('.selection-float')
+      const noteModal = document.querySelector('.note-modal')
 
-      if (transcript?.contains(target) || actionDock?.contains(target) || selectionFloat?.contains(target)) {
+      if (transcript?.contains(target) || actionDock?.contains(target) || selectionFloat?.contains(target) || noteModal?.contains(target)) {
         return
       }
 
@@ -1191,13 +1304,10 @@ function App() {
 
   function openReader(videoId: string) {
     const video = findVideoById(videos, videoId)
-    setVideoMeta((current) => ({
-      ...current,
-      [videoId]: {
-        ...(current[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }),
-        status: current[videoId]?.status === 'done' ? 'done' : 'learning',
-      },
-    }))
+    const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+    if (meta.status !== 'done') {
+      void updateVideoMeta(videoId, { status: 'learning' })
+    }
 
     startTransition(() => {
       setSelectedVideoId(videoId)
@@ -1333,11 +1443,13 @@ function App() {
     setCurrentUser(null)
     setScreen('home')
     setVideos(catalogVideos)
+    setVideoMeta(initialVideoMeta(catalogVideos))
     setLibraryIds(initialLibraryIds)
     setSelectedVideoId(initialLibraryIds[0])
     setCurrentPosition(videoById(initialLibraryIds[0]).lastPositionSec)
     setSavedNotes([])
     setChatRecords([])
+    setTranslatedSegments({})
     setAiAnswer('')
     setShowAddModal(false)
     setTranscriptSelection(null)
@@ -1379,11 +1491,7 @@ function App() {
       setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
       setVideoMeta((current) => ({
         ...current,
-        [importedVideo.id]: {
-          status: 'inbox',
-          isFavourite: false,
-          tags: [],
-        },
+        [importedVideo.id]: videoMetaFromVideo(importedVideo),
       }))
       setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
       setSelectedVideoId(importedVideo.id)
@@ -1455,6 +1563,35 @@ function App() {
     }
   }
 
+  async function persistTranslationCache(
+    videoId: string,
+    language: string,
+    segments: Record<string, string>,
+    status: 'partial' | 'ready' | 'failed',
+  ) {
+    if (!currentUser || !supabase) {
+      throw new Error('Please log in before caching translated captions.')
+    }
+
+    const { error } = await supabase
+      .from('learning_translations')
+      .upsert(
+        {
+          user_id: currentUser.id,
+          video_id: videoId,
+          language,
+          segments,
+          status,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,video_id,language' },
+      )
+
+    if (error) {
+      throw error
+    }
+  }
+
   async function translateBatch(batch: TranslationBatch) {
     const numberedLines = batch.segments.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
     const accessToken = await getAccessToken()
@@ -1479,15 +1616,10 @@ function App() {
     }
 
     const translatedLines = parseNumberedTranslations(String(data.answer ?? ''), batch.segments.length)
-
-    setTranslatedSegments((current) => {
-      const next = { ...current }
-      batch.segments.forEach((segment, index) => {
-        next[translationKey(selectedVideo.id, batch.language, segment.id)] =
-          translatedLines[index] || 'Translation unavailable.'
-      })
-      return next
-    })
+    return batch.segments.reduce<Record<string, string>>((acc, segment, index) => {
+      acc[segment.id] = translatedLines[index] || 'Translation unavailable.'
+      return acc
+    }, {})
   }
 
   async function runTranslationBatches(batches: TranslationBatch[], totalSegments: number, completedOffset = 0) {
@@ -1506,14 +1638,29 @@ function App() {
     let completed = completedOffset
     const failed: TranslationBatch[] = []
     let lastError = ''
+    let cachedSegments = translationSegmentsForVideo(translatedSegments, selectedVideo.id, batches[0].language)
 
     for (const batch of batches) {
       try {
-        await translateBatch(batch)
+        const batchTranslations = await translateBatch(batch)
+        cachedSegments = {
+          ...cachedSegments,
+          ...batchTranslations,
+        }
+        const status = completed + batch.segments.length >= totalSegments ? 'ready' : 'partial'
+        await persistTranslationCache(selectedVideo.id, batch.language, cachedSegments, status)
+        setTranslatedSegments((current) => {
+          const next = { ...current }
+          Object.entries(batchTranslations).forEach(([segmentId, text]) => {
+            next[translationKey(selectedVideo.id, batch.language, segmentId)] = text
+          })
+          return next
+        })
         completed += batch.segments.length
       } catch (error) {
         failed.push(batch)
         lastError = error instanceof Error ? error.message : 'Translation failed.'
+        await persistTranslationCache(selectedVideo.id, batch.language, cachedSegments, 'failed').catch(() => null)
         setTranslationStatus({
           total: totalSegments,
           completed: Math.min(completed, totalSegments),
@@ -1616,21 +1763,40 @@ function App() {
   }
 
   async function persistNote(note: SavedNote) {
-    try {
-      if (!supabase) {
-        throw new Error('Supabase is not configured.')
-      }
-
-      const { error } = await supabase
-        .from('learning_notes')
-        .upsert(noteToRow(note, currentUser?.id), { onConflict: 'user_id,id' })
-
-      if (error) {
-        throw error
-      }
-    } catch {
-      setToast('Note is saved on screen, but Supabase persistence failed.')
+    if (!currentUser || !supabase) {
+      throw new Error('Please log in before saving notes.')
     }
+
+    const { data, error } = await supabase
+      .from('learning_notes')
+      .upsert(noteToRow(note, currentUser.id), { onConflict: 'user_id,id' })
+      .select('*')
+      .single()
+
+    if (error) {
+      throw error
+    }
+
+    return rowToNote(data as LearningNoteRow)
+  }
+
+  async function persistVideoMeta(videoId: string, meta: VideoMeta) {
+    if (!currentUser || !supabase) {
+      throw new Error('Please log in before updating the library.')
+    }
+
+    const video = findVideoById(videos, videoId)
+    const { data, error } = await supabase
+      .from('learning_videos')
+      .upsert(videoToRow(video, currentUser.id, meta), { onConflict: 'user_id,id' })
+      .select('*')
+      .single()
+
+    if (error) {
+      throw error
+    }
+
+    return rowToVideo(data as LearningVideoRow)
   }
 
   async function saveNote(source: SavedNote['source'], type: NoteType = source === 'ai' ? aiSaveType : 'highlight') {
@@ -1658,36 +1824,37 @@ function App() {
       topics: selectedVideoMeta.tags,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      isStarred: false,
       source,
     }
 
-    setSavedNotes((current) => [note, ...current])
-    setVideoMeta((current) => ({
-      ...current,
-      [selectedVideo.id]: {
-        ...selectedVideoMeta,
+    try {
+      const storedNote = await persistNote(note)
+      setSavedNotes((current) => [storedNote, ...current.filter((existing) => existing.id !== storedNote.id)])
+      void updateVideoMeta(selectedVideo.id, {
         status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
-      },
-    }))
-    setRightTab('note')
-    setShowNoteModal(false)
-    setShowAiSaveOptions(false)
-    clearNativeSelection()
+      })
+      setRightTab('note')
+      setShowNoteModal(false)
+      setShowAiSaveOptions(false)
+      clearNativeSelection()
 
-    if (isAiNote) {
-      setAiAnswer('')
-      setChatPrompt('')
+      if (isAiNote) {
+        setAiAnswer('')
+        setChatPrompt('')
+      }
+
+      const savedMessage =
+        source === 'ai'
+          ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
+          : source === 'highlight'
+            ? 'Saved as Highlight.'
+            : 'Saved as Thought.'
+      setToast(savedMessage)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save note.'
+      setToast(message)
     }
-
-    const savedMessage =
-      source === 'ai'
-        ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
-        : source === 'highlight'
-          ? 'Saved as Highlight.'
-          : 'Saved as Thought.'
-    setToast(savedMessage)
-
-    await persistNote(note)
   }
 
   function openThoughtModal() {
@@ -1699,17 +1866,33 @@ function App() {
     setShowNoteModal(true)
   }
 
-  function updateVideoMeta(videoId: string, patch: Partial<VideoMeta>) {
-    setVideoMeta((current) => {
-      const previous = current[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
-      return {
+  async function updateVideoMeta(videoId: string, patch: Partial<VideoMeta>) {
+    const previousMeta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
+    const nextMeta = {
+      ...previousMeta,
+      ...patch,
+    }
+
+    setVideoMeta((current) => ({
+      ...current,
+      [videoId]: nextMeta,
+    }))
+
+    try {
+      const persistedVideo = await persistVideoMeta(videoId, nextMeta)
+      setVideos((current) => current.map((video) => (video.id === videoId ? { ...video, ...persistedVideo } : video)))
+      setVideoMeta((current) => ({
         ...current,
-        [videoId]: {
-          ...previous,
-          ...patch,
-        },
-      }
-    })
+        [videoId]: videoMetaFromVideo(persistedVideo),
+      }))
+    } catch (error) {
+      setVideoMeta((current) => ({
+        ...current,
+        [videoId]: previousMeta,
+      }))
+      const message = error instanceof Error ? error.message : 'Failed to save library update.'
+      setToast(message)
+    }
   }
 
   function openTagEditor(videoId: string) {
@@ -1729,57 +1912,137 @@ function App() {
       setTagDraft('')
       return
     }
-    updateVideoMeta(videoId, { tags: [...meta.tags, cleanTag] })
+    void updateVideoMeta(videoId, { tags: [...meta.tags, cleanTag] })
     setTagDraft('')
   }
 
   function removeTagFromVideo(videoId: string, tag: string) {
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
-    updateVideoMeta(videoId, { tags: meta.tags.filter((item) => item !== tag) })
+    void updateVideoMeta(videoId, { tags: meta.tags.filter((item) => item !== tag) })
   }
 
-  function deleteVideo(videoId: string) {
+  async function deleteVideo(videoId: string) {
+    if (!currentUser || !supabase) {
+      setToast('Please log in before deleting videos.')
+      return
+    }
+
+    const previousVideos = videos
+    const previousLibraryIds = libraryIds
+    const previousNotes = savedNotes
+    const previousVideoMeta = videoMeta
+    const previousTranslations = translatedSegments
+
     setLibraryIds((current) => current.filter((id) => id !== videoId))
     setVideos((current) => current.filter((video) => video.id !== videoId))
     setSavedNotes((current) => current.filter((note) => note.videoId !== videoId))
+    setVideoMeta((current) => {
+      const next = { ...current }
+      delete next[videoId]
+      return next
+    })
+    setTranslatedSegments((current) =>
+      Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(`${videoId}:`))),
+    )
     setActiveVideoMenuId(null)
     if (selectedVideoId === videoId) {
       const nextId = libraryIds.find((id) => id !== videoId) ?? initialLibraryIds[0]
       setSelectedVideoId(nextId)
     }
-    setToast('Video deleted from this workspace.')
+
+    try {
+      const [translationsResult, notesResult, conversationsResult, videosResult] = await Promise.all([
+        supabase.from('learning_translations').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
+        supabase.from('learning_notes').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
+        supabase.from('learning_conversations').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
+        supabase.from('learning_videos').delete().eq('user_id', currentUser.id).eq('id', videoId),
+      ])
+      const error = translationsResult.error ?? notesResult.error ?? conversationsResult.error ?? videosResult.error
+      if (error) {
+        throw error
+      }
+      setToast('Video deleted from this workspace.')
+    } catch (error) {
+      setVideos(previousVideos)
+      setLibraryIds(previousLibraryIds)
+      setSavedNotes(previousNotes)
+      setVideoMeta(previousVideoMeta)
+      setTranslatedSegments(previousTranslations)
+      const message = error instanceof Error ? error.message : 'Failed to delete video.'
+      setToast(message)
+    }
   }
 
-  function updateNote(noteId: string, patch: Partial<SavedNote>) {
-    setSavedNotes((current) =>
-      current.map((note) =>
-        note.id === noteId
-          ? {
-              ...note,
-              ...patch,
-              updatedAt: new Date().toISOString(),
-            }
-          : note,
-      ),
-    )
+  async function updateNote(noteId: string, patch: Partial<SavedNote>) {
+    if (!currentUser || !supabase) {
+      setToast('Please log in before updating notes.')
+      return false
+    }
+
+    const previousNotes = savedNotes
+    const targetNote = savedNotes.find((note) => note.id === noteId)
+    if (!targetNote) return false
+
+    const nextNote: SavedNote = {
+      ...targetNote,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    }
+
+    setSavedNotes((current) => current.map((note) => (note.id === noteId ? nextNote : note)))
+
+    try {
+      const storedNote = await persistNote(nextNote)
+      setSavedNotes((current) => current.map((note) => (note.id === noteId ? storedNote : note)))
+      return true
+    } catch (error) {
+      setSavedNotes(previousNotes)
+      const message = error instanceof Error ? error.message : 'Failed to update note.'
+      setToast(message)
+      return false
+    }
   }
 
-  function deleteNote(noteId: string) {
+  async function deleteNote(noteId: string) {
+    if (!currentUser || !supabase) {
+      setToast('Please log in before deleting notes.')
+      return
+    }
+
+    const previousNotes = savedNotes
     setSavedNotes((current) => current.filter((note) => note.id !== noteId))
     setActiveNoteMenuId(null)
-    setToast('Note deleted.')
+
+    try {
+      const { error } = await supabase
+        .from('learning_notes')
+        .delete()
+        .eq('user_id', currentUser.id)
+        .eq('id', noteId)
+
+      if (error) {
+        throw error
+      }
+      setToast('Note deleted.')
+    } catch (error) {
+      setSavedNotes(previousNotes)
+      const message = error instanceof Error ? error.message : 'Failed to delete note.'
+      setToast(message)
+    }
   }
 
-  function editNoteContent(note: SavedNote) {
+  async function editNoteContent(note: SavedNote) {
     const nextContent = window.prompt('Edit note', note.content ?? note.note)
     if (nextContent === null) return
 
-    updateNote(note.id, {
+    const didUpdate = await updateNote(note.id, {
       content: nextContent,
       note: nextContent,
     })
     setActiveNoteMenuId(null)
-    setToast('Note updated.')
+    if (didUpdate) {
+      setToast('Note updated.')
+    }
   }
 
   function renderChatThread(emptyDescription: string) {
@@ -1804,7 +2067,7 @@ function App() {
                         <option value="keyIdea">Save as Key Idea</option>
                         <option value="reviewQuestion">Save as Review Question</option>
                       </select>
-                      <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('ai', aiSaveType)}>
+                      <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('ai', aiSaveType)}>
                         Save
                       </button>
                     </div>
@@ -1929,7 +2192,7 @@ function App() {
       { label: 'Key Ideas', type: 'keyIdea' },
       { label: 'Review Questions', type: 'reviewQuestion' },
     ]
-    const sourceNotes = allNotes.length ? allNotes : demoNotebookNotes
+    const sourceNotes = currentUser ? allNotes : demoNotebookNotes
     const noteVideoOptions = Array.from(
       new Map(sourceNotes.map((note) => [note.videoId, note.videoTitle ?? findVideoById(videos, note.videoId).title])).entries(),
     )
@@ -1938,7 +2201,7 @@ function App() {
       .filter((note) => noteTypeFilter === 'all' || noteTypeFromSource(note) === noteTypeFilter)
       .filter((note) => noteVideoFilter === 'all' || note.videoId === noteVideoFilter)
       .filter((note) => noteTagFilter === 'all' || note.tags.includes(noteTagFilter))
-      .filter((note) => !noteStarredOnly || likedNoteIds.includes(note.id))
+      .filter((note) => !noteStarredOnly || note.isStarred)
       .sort((a, b) => {
         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
@@ -2021,7 +2284,8 @@ function App() {
                   {activeNoteMenuId === note.id ? (
                     <div className="row-menu row-menu--note">
                       <button type="button" onClick={() => openReader(note.videoId)}>Open video</button>
-                      <button type="button" onClick={() => deleteNote(note.id)}>Delete</button>
+                      <button type="button" onClick={() => void editNoteContent(note)}>Edit</button>
+                      <button type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
                     </div>
                   ) : null}
                 </div>
@@ -2033,14 +2297,10 @@ function App() {
                     {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
                   </div>
                   <button
-                    className={`note-like-button ${likedNoteIds.includes(note.id) ? 'note-like-button--active' : ''}`}
+                    className={`note-like-button ${note.isStarred ? 'note-like-button--active' : ''}`}
                     type="button"
-                    aria-label="Like note"
-                    onClick={() => setLikedNoteIds((current) => (
-                      current.includes(note.id)
-                        ? current.filter((id) => id !== note.id)
-                        : [...current, note.id]
-                    ))}
+                    aria-label={note.isStarred ? 'Unstar note' : 'Star note'}
+                    onClick={() => void updateNote(note.id, { isStarred: !note.isStarred })}
                   >
                     <ThumbsUp size={15} />
                   </button>
@@ -2319,7 +2579,7 @@ function App() {
                               aria-label={meta.isFavourite ? 'Unfavourite' : 'Favourite'}
                               onClick={(event) => {
                                 event.stopPropagation()
-                                updateVideoMeta(video.id, { isFavourite: !meta.isFavourite })
+                                void updateVideoMeta(video.id, { isFavourite: !meta.isFavourite })
                               }}
                             >
                               <Star size={16} />
@@ -2338,12 +2598,12 @@ function App() {
                             {activeVideoMenuId === video.id ? (
                               <div className="row-menu" onClick={(event) => event.stopPropagation()}>
                                 <button type="button" onClick={() => openTagEditor(video.id)}>Edit Tags</button>
-                                <button type="button" onClick={() => { updateVideoMeta(video.id, { status: 'done' }); setActiveVideoMenuId(null) }}>Mark as Done</button>
-                                <button type="button" onClick={() => { updateVideoMeta(video.id, { status: 'inbox' }); setActiveVideoMenuId(null) }}>Move to Inbox</button>
-                                <button type="button" onClick={() => { updateVideoMeta(video.id, { isFavourite: !meta.isFavourite }); setActiveVideoMenuId(null) }}>
+                                <button type="button" onClick={() => { void updateVideoMeta(video.id, { status: 'done' }); setActiveVideoMenuId(null) }}>Mark as Done</button>
+                                <button type="button" onClick={() => { void updateVideoMeta(video.id, { status: 'inbox' }); setActiveVideoMenuId(null) }}>Move to Inbox</button>
+                                <button type="button" onClick={() => { void updateVideoMeta(video.id, { isFavourite: !meta.isFavourite }); setActiveVideoMenuId(null) }}>
                                   {meta.isFavourite ? 'Unfavourite' : 'Favourite'}
                                 </button>
-                                <button type="button" onClick={() => deleteVideo(video.id)}>Delete</button>
+                                <button type="button" onClick={() => void deleteVideo(video.id)}>Delete</button>
                               </div>
                             ) : null}
                           </div>
@@ -2553,8 +2813,8 @@ function App() {
                           </div>
                           <div className="note-card__actions">
                             <button className="text-button" type="button" onClick={() => handleSeek(Number(note.timestamp.split(':')[0]) * 60 + Number(note.timestamp.split(':')[1] ?? 0))}>Jump</button>
-                            <button className="text-button" type="button" onClick={() => editNoteContent(note)}>Edit</button>
-                            <button className="text-button" type="button" onClick={() => deleteNote(note.id)}>Delete</button>
+                            <button className="text-button" type="button" onClick={() => void editNoteContent(note)}>Edit</button>
+                            <button className="text-button" type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
                           </div>
                         </article>
                       ))
@@ -2680,7 +2940,7 @@ function App() {
             exit={{ opacity: 0, y: 8 }}
             style={{ left: transcriptSelection.x, top: transcriptSelection.y }}
           >
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => saveNote('highlight', 'highlight')}>
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveNote('highlight', 'highlight')}>
               Save to Notebook
             </button>
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={openThoughtModal}>
@@ -2757,7 +3017,7 @@ function App() {
                   <button className="secondary-button" type="button" onClick={() => setShowNoteModal(false)}>
                     Cancel
                   </button>
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => saveNote('thought', 'thought')}>
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('thought', 'thought')}>
                     Save Thought
                   </button>
                 </div>
