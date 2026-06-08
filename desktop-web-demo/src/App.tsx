@@ -748,8 +748,9 @@ function App() {
 
   const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
   const chatAnswer = aiAnswer || chatResponse
+  const activeChatQuestion = chatPrompt.trim()
   const shouldShowChatSuggestions =
-    !chatPrompt.trim() &&
+    !activeChatQuestion &&
     !isAsking &&
     !aiAnswer &&
     selectedChatRecords.length === 0
@@ -1530,6 +1531,7 @@ function App() {
 
     setRightTab('chat')
     setIsAsking(true)
+    setAiAnswer('')
     setShowAiSaveOptions(false)
     setToast('Asking Kimi about this video...')
 
@@ -2051,42 +2053,58 @@ function App() {
   }
 
   function renderChatThread(emptyDescription: string) {
+    const hasLiveAnswer = isAsking || Boolean(aiAnswer)
+    const recordsToShow = selectedChatRecords.filter(
+      (record) => !(aiAnswer && record.answer === aiAnswer && record.question === activeChatQuestion),
+    )
+
     return (
       <div className="chat-thread">
-        {selectedChatRecords.length ? (
-          selectedChatRecords.map((record, index) => (
+        {hasLiveAnswer ? (
+          <article className="chat-card chat-card--record chat-card--live">
+            <span>AI Answer</span>
+            {activeChatQuestion ? <strong className="chat-card__question">{activeChatQuestion}</strong> : null}
+            {chatContextQuote ? <blockquote className="chat-quote">{chatContextQuote}</blockquote> : null}
+            <p>{isAsking && !aiAnswer ? 'Kimi is thinking...' : aiAnswer}</p>
+            {aiAnswer ? (
+              <div className="chat-card__actions chat-card__actions--stacked">
+                <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
+                  Save to Notebook
+                </button>
+                {showAiSaveOptions ? (
+                  <div className="save-type-picker">
+                    <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
+                      <option value="explanation">Save as Explanation</option>
+                      <option value="keyIdea">Save as Key Idea</option>
+                      <option value="reviewQuestion">Save as Review Question</option>
+                    </select>
+                    <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('ai', aiSaveType)}>
+                      Save
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </article>
+        ) : null}
+
+        {recordsToShow.length ? (
+          recordsToShow.map((record) => (
             <article key={record.id} className="chat-card chat-card--record">
-              <span>{index === 0 && aiAnswer ? 'AI Answer' : new Date(record.createdAt).toLocaleString()}</span>
+              <span>{new Date(record.createdAt).toLocaleString()}</span>
               <strong className="chat-card__question">{record.question}</strong>
               {record.quote ? <blockquote className="chat-quote">{record.quote}</blockquote> : null}
               <p>{record.answer}</p>
-              {index === 0 && aiAnswer ? (
-                <div className="chat-card__actions chat-card__actions--stacked">
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
-                    Save to Notebook
-                  </button>
-                  {showAiSaveOptions ? (
-                    <div className="save-type-picker">
-                      <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
-                        <option value="explanation">Save as Explanation</option>
-                        <option value="keyIdea">Save as Key Idea</option>
-                        <option value="reviewQuestion">Save as Review Question</option>
-                      </select>
-                      <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('ai', aiSaveType)}>
-                        Save
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
             </article>
           ))
-        ) : (
+        ) : null}
+
+        {!hasLiveAnswer && !recordsToShow.length ? (
           <article className="empty-card">
             <strong>Ask about this video</strong>
             <p>{emptyDescription}</p>
           </article>
-        )}
+        ) : null}
       </div>
     )
   }
@@ -2835,6 +2853,8 @@ function App() {
 
               {rightTab === 'chat' ? (
                 <div className="detail-panel detail-panel--chat">
+                  {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
+
                   {shouldShowChatSuggestions ? (
                     <>
                       <p className="panel-kicker">Suggested prompts</p>
@@ -2848,8 +2868,6 @@ function App() {
                       </div>
                     </>
                   ) : null}
-
-                  {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
 
                   <section className="meta-section chat-composer-section">
                     <p>Ask about this video</p>
