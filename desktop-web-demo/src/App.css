@@ -2231,7 +2231,7 @@
 
 .home-discovery-waterfall {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
+  align-items: stretch;
 }
 
 .home-video-card {
@@ -2245,14 +2245,6 @@
   color: #263141;
   text-align: left;
   box-shadow: 0 12px 30px rgba(26, 34, 45, 0.05);
-}
-
-.home-video-card:nth-child(2n) {
-  transform: translateY(18px);
-}
-
-.home-video-card:nth-child(5n) {
-  transform: translateY(36px);
 }
 
 .home-video-card__thumb {
@@ -2907,9 +2899,7 @@
     grid-template-columns: 1fr;
   }
 
-  .home-video-card,
-  .home-video-card:nth-child(2n),
-  .home-video-card:nth-child(5n) {
+  .home-video-card {
     grid-template-columns: none;
     grid-template-rows: auto minmax(0, 1fr);
     transform: none;
