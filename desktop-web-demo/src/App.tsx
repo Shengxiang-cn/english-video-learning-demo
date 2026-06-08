@@ -1,15 +1,21 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowLeft,
   BookOpen,
+  Bookmark,
   ChevronDown,
+  Check,
+  Copy,
   FileText,
   Home as HomeIcon,
+  Loader2,
   LogOut,
   MessageCircle,
   MoreHorizontal,
   Plus,
+  RefreshCw,
+  Send,
   Sparkles,
   Star,
   StickyNote,
@@ -65,6 +71,14 @@ type SavedNote = {
   source: 'thought' | 'manual' | 'ai' | 'highlight'
 }
 
+type ChatCitation = {
+  segmentId: string
+  startSec: number
+  endSec: number
+  label: string
+  text: string
+}
+
 type ChatRecord = {
   id: string
   videoId: string
@@ -72,6 +86,8 @@ type ChatRecord = {
   question: string
   quote?: string
   answer: string
+  citations?: ChatCitation[]
+  followUps?: string[]
   createdAt: string
 }
 
@@ -140,7 +156,20 @@ type LearningConversationRow = {
   question: string
   quote?: string | null
   answer: string
+  citations?: unknown
+  follow_ups?: unknown
   created_at: string
+}
+
+type PendingChatRequest = {
+  id: string
+  question: string
+  quote: string
+  timestamp: string
+}
+
+type FailedChatRequest = PendingChatRequest & {
+  message: string
 }
 
 type TranscriptSelection = {
@@ -501,6 +530,29 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+function chatCitationArray(value: unknown): ChatCitation[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return []
+    }
+
+    const citation = item as Partial<ChatCitation>
+    const segmentId = typeof citation.segmentId === 'string' ? citation.segmentId : ''
+    const startSec = Number(citation.startSec)
+    const endSec = Number(citation.endSec)
+    const label = typeof citation.label === 'string' ? citation.label : formatTime(startSec)
+    const text = typeof citation.text === 'string' ? citation.text : ''
+
+    return segmentId && Number.isFinite(startSec) && Number.isFinite(endSec)
+      ? [{ segmentId, startSec, endSec, label, text }]
+      : []
+  })
+}
+
 function normalizedStatus(status: unknown, fallback: InboxTab = 'inbox'): InboxTab {
   return status === 'inbox' || status === 'learning' || status === 'done' ? status : fallback
 }
@@ -619,6 +671,8 @@ function rowToChatRecord(row: LearningConversationRow): ChatRecord {
     question: row.question,
     quote: row.quote ?? '',
     answer: row.answer,
+    citations: chatCitationArray(row.citations),
+    followUps: stringArray(row.follow_ups),
     createdAt: row.created_at,
   }
 }
@@ -687,12 +741,14 @@ function App() {
   const [noteSortOrder, setNoteSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [linkInput, setLinkInput] = useState(defaultImportUrl)
   const [chatPrompt, setChatPrompt] = useState('')
-  const [aiAnswer, setAiAnswer] = useState('')
   const [isAsking, setIsAsking] = useState(false)
+  const [pendingChatRequest, setPendingChatRequest] = useState<PendingChatRequest | null>(null)
+  const [failedChatRequest, setFailedChatRequest] = useState<FailedChatRequest | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const [showTranslations, setShowTranslations] = useState(false)
   const [aiSaveType, setAiSaveType] = useState<Exclude<NoteType, 'highlight' | 'thought'>>('explanation')
-  const [showAiSaveOptions, setShowAiSaveOptions] = useState(false)
+  const [activeAiSaveMenuId, setActiveAiSaveMenuId] = useState<string | null>(null)
+  const [copiedChatMessageId, setCopiedChatMessageId] = useState<string | null>(null)
   const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
   const [translationStatus, setTranslationStatus] = useState<TranslationStatus>({
@@ -714,6 +770,7 @@ function App() {
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
   const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const isChatComposingRef = useRef(false)
   const selectionFloatRef = useRef<HTMLDivElement | null>(null)
   const tagInputRef = useRef<HTMLInputElement | null>(null)
   const youtubeFrameRef = useRef<HTMLIFrameElement | null>(null)
@@ -739,21 +796,21 @@ function App() {
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
     return inboxTab === 'favourite' ? meta.isFavourite : meta.status === inboxTab
   })
-  const selectedChatRecords = chatRecords.filter((record) => record.videoId === selectedVideo.id)
+  const selectedChatRecords = chatRecords
+    .filter((record) => record.videoId === selectedVideo.id)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   const activeSegmentIndex = transcript.findIndex(
     (segment) => currentPosition >= segment.startSec && currentPosition <= segment.endSec,
   )
   const selectedSegmentIds = transcriptSelection?.segmentIds ?? []
   const chatContextQuote = chatContextSelection?.quote || selectedQuote
 
-  const chatResponse = useMemo(() => buildTakeaway(selectedVideo, selectedQuote), [selectedQuote, selectedVideo])
-  const chatAnswer = aiAnswer || chatResponse
   const activeChatQuestion = chatPrompt.trim()
+  const hasChatActivity = selectedChatRecords.length > 0 || Boolean(pendingChatRequest) || Boolean(failedChatRequest)
   const shouldShowChatSuggestions =
     !activeChatQuestion &&
     !isAsking &&
-    !aiAnswer &&
-    selectedChatRecords.length === 0
+    !hasChatActivity
 
   async function getAccessToken() {
     if (!supabase) {
@@ -940,8 +997,12 @@ function App() {
   }, [])
 
   useEffect(() => {
-    setAiAnswer('')
-  }, [selectedVideoId, selectedQuote])
+    setChatPrompt('')
+    setPendingChatRequest(null)
+    setFailedChatRequest(null)
+    setActiveAiSaveMenuId(null)
+    setCopiedChatMessageId(null)
+  }, [selectedVideoId])
 
   useEffect(() => {
     function syncYoutubeProgress(event: MessageEvent) {
@@ -1456,7 +1517,9 @@ function App() {
     setSavedNotes([])
     setChatRecords([])
     setTranslatedSegments({})
-    setAiAnswer('')
+    setChatPrompt('')
+    setPendingChatRequest(null)
+    setFailedChatRequest(null)
     setShowAddModal(false)
     setTranscriptSelection(null)
     lastSavedProgressRef.current = {}
@@ -1518,21 +1581,33 @@ function App() {
     }
   }
 
-  async function handleAskAi() {
+  async function sendChatQuestion(questionInput = chatPrompt, contextOverride?: Pick<PendingChatRequest, 'quote' | 'timestamp'>) {
     if (!currentUser) {
       setToast('Please log in before asking AI.')
       return
     }
 
-    if (!chatPrompt.trim()) {
+    const question = questionInput.trim()
+    if (!question) {
       setToast('Type a question for AI first.')
       return
     }
 
+    const contextQuote = contextOverride?.quote ?? chatContextQuote
+    const contextTimestamp = contextOverride?.timestamp ?? (chatContextSelection?.timestamp ?? selectedTimestamp)
+    const pendingRequest: PendingChatRequest = {
+      id: `pending-${Date.now()}`,
+      question,
+      quote: contextQuote,
+      timestamp: contextTimestamp,
+    }
+
     setRightTab('chat')
     setIsAsking(true)
-    setAiAnswer('')
-    setShowAiSaveOptions(false)
+    setActiveAiSaveMenuId(null)
+    setFailedChatRequest(null)
+    setPendingChatRequest(pendingRequest)
+    setChatPrompt('')
     setToast('Asking Kimi about this video...')
 
     try {
@@ -1545,8 +1620,8 @@ function App() {
         },
         body: JSON.stringify({
           video: selectedVideo,
-          question: chatPrompt,
-          quote: chatContextQuote,
+          question,
+          quote: contextQuote,
           saveConversation: true,
         }),
       })
@@ -1556,18 +1631,37 @@ function App() {
         throw new Error(data?.error ?? 'AI request failed.')
       }
 
-      setAiAnswer(String(data.answer ?? 'No answer returned.'))
       if (data.conversation) {
         setChatRecords((current) => [data.conversation as ChatRecord, ...current])
+      } else {
+        throw new Error('AI answer was generated but not saved.')
       }
-      setShowAiSaveOptions(true)
+      setPendingChatRequest(null)
+      setChatContextSelection(null)
+      clearNativeSelection()
       setToast('Kimi answer is ready.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI request failed.'
+      setFailedChatRequest({
+        ...pendingRequest,
+        message,
+      })
       setToast(message)
     } finally {
       setIsAsking(false)
+      setPendingChatRequest(null)
     }
+  }
+
+  function handleAskAi() {
+    void sendChatQuestion()
+  }
+
+  function handleRetryChat(request: FailedChatRequest) {
+    void sendChatQuestion(request.question, {
+      quote: request.quote,
+      timestamp: request.timestamp,
+    })
   }
 
   async function persistTranslationCache(
@@ -1759,8 +1853,7 @@ function App() {
       setChatContextSelection(selection)
     }
     setChatPrompt(selectedQuote)
-    setAiAnswer('')
-    setShowAiSaveOptions(false)
+    setActiveAiSaveMenuId(null)
     setRightTab('chat')
     clearNativeSelection()
     window.setTimeout(() => {
@@ -1806,16 +1899,15 @@ function App() {
     return rowToVideo(data as LearningVideoRow)
   }
 
-  async function saveNote(source: SavedNote['source'], type: NoteType = source === 'ai' ? aiSaveType : 'highlight') {
-    const noteQuote = source === 'ai' ? chatContextQuote : selectedQuote
-    const noteTimestamp = source === 'ai' ? (chatContextSelection?.timestamp ?? selectedTimestamp) : selectedTimestamp
+  async function saveNote(source: 'highlight' | 'thought', type: NoteType = source === 'thought' ? 'thought' : 'highlight') {
+    const noteQuote = selectedQuote
+    const noteTimestamp = selectedTimestamp
 
     if (!noteQuote) {
       return
     }
 
-    const isAiNote = source === 'ai'
-    const content = isAiNote ? chatAnswer : source === 'highlight' ? noteQuote : noteDraft
+    const content = source === 'highlight' ? noteQuote : noteDraft
     const note: SavedNote = {
       id: `${selectedVideo.id}-${noteTimestamp}-${Date.now()}`,
       videoId: selectedVideo.id,
@@ -1823,7 +1915,7 @@ function App() {
       quote: noteQuote,
       timestamp: noteTimestamp,
       note: content,
-      takeaway: isAiNote ? chatAnswer : buildTakeaway(selectedVideo, noteQuote),
+      takeaway: buildTakeaway(selectedVideo, noteQuote),
       tags: selectedVideoMeta.tags,
       type,
       originalSubtitle: noteQuote,
@@ -1843,24 +1935,75 @@ function App() {
       })
       setRightTab('note')
       setShowNoteModal(false)
-      setShowAiSaveOptions(false)
+      setActiveAiSaveMenuId(null)
       clearNativeSelection()
 
-      if (isAiNote) {
-        setAiAnswer('')
-        setChatPrompt('')
-      }
-
       const savedMessage =
-        source === 'ai'
-          ? `Saved as ${noteTypeLabel(type)}. Chat context cleared.`
-          : source === 'highlight'
-            ? 'Saved as Highlight.'
-            : 'Saved as Thought.'
+        source === 'highlight'
+          ? 'Saved as Highlight.'
+          : 'Saved as Thought.'
       setToast(savedMessage)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save note.'
       setToast(message)
+    }
+  }
+
+  async function saveAiResponseAsNote(record: ChatRecord, type: Exclude<NoteType, 'highlight' | 'thought'> = aiSaveType) {
+    const firstCitation = record.citations?.[0]
+    const noteQuote = record.quote || firstCitation?.text || record.question
+    const noteTimestamp = firstCitation ? formatTime(firstCitation.startSec) : selectedTimestamp
+    const note: SavedNote = {
+      id: `${selectedVideo.id}-${noteTimestamp}-${Date.now()}`,
+      videoId: selectedVideo.id,
+      videoTitle: selectedVideo.title,
+      quote: noteQuote,
+      timestamp: noteTimestamp,
+      note: record.answer,
+      takeaway: record.answer,
+      tags: selectedVideoMeta.tags,
+      type,
+      originalSubtitle: noteQuote,
+      content: record.answer,
+      topics: selectedVideoMeta.tags,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isStarred: false,
+      source: 'ai',
+    }
+
+    try {
+      const storedNote = await persistNote(note)
+      setSavedNotes((current) => [storedNote, ...current.filter((existing) => existing.id !== storedNote.id)])
+      void updateVideoMeta(selectedVideo.id, {
+        status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
+      })
+      setActiveAiSaveMenuId(null)
+      setToast(`Saved as ${noteTypeLabel(type)}.`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save note.'
+      setToast(message)
+    }
+  }
+
+  async function copyChatAnswer(record: ChatRecord) {
+    try {
+      await navigator.clipboard.writeText(record.answer)
+      setCopiedChatMessageId(record.id)
+      window.setTimeout(() => setCopiedChatMessageId(null), 1600)
+    } catch {
+      setToast('Failed to copy answer.')
+    }
+  }
+
+  function handleChatKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || isChatComposingRef.current) {
+      return
+    }
+
+    event.preventDefault()
+    if (!isAsking && chatPrompt.trim()) {
+      void sendChatQuestion()
     }
   }
 
@@ -2052,58 +2195,103 @@ function App() {
     }
   }
 
-  function renderChatThread(emptyDescription: string) {
-    const hasLiveAnswer = isAsking || Boolean(aiAnswer)
-    const recordsToShow = selectedChatRecords.filter(
-      (record) => !(aiAnswer && record.answer === aiAnswer && record.question === activeChatQuestion),
-    )
-
+  function renderChatThread() {
+    const latestRecordId = selectedChatRecords[selectedChatRecords.length - 1]?.id
     return (
       <div className="chat-thread">
-        {hasLiveAnswer ? (
-          <article className="chat-card chat-card--record chat-card--live">
-            <span>AI Answer</span>
-            {activeChatQuestion ? <strong className="chat-card__question">{activeChatQuestion}</strong> : null}
-            {chatContextQuote ? <blockquote className="chat-quote">{chatContextQuote}</blockquote> : null}
-            <p>{isAsking && !aiAnswer ? 'Kimi is thinking...' : aiAnswer}</p>
-            {aiAnswer ? (
-              <div className="chat-card__actions chat-card__actions--stacked">
-                <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowAiSaveOptions((current) => !current)} disabled={!chatContextQuote}>
-                  Save to Notebook
-                </button>
-                {showAiSaveOptions ? (
-                  <div className="save-type-picker">
+        {!hasChatActivity ? (
+          <article className="chat-empty-state">
+            <strong>Ask about this video</strong>
+            <p>Ask for meaning, arguments, examples, or study notes grounded in the transcript.</p>
+          </article>
+        ) : null}
+
+        {selectedChatRecords.map((record) => {
+          const showFollowUps = record.id === latestRecordId && (record.followUps?.length ?? 0) > 0 && !isAsking
+
+          return (
+            <div key={record.id} className="chat-exchange">
+              <article className="chat-message chat-message--user">
+                <p>{record.question}</p>
+                {record.quote ? <span>Using subtitle context</span> : null}
+              </article>
+
+              <article className="chat-message chat-message--assistant">
+                <div className="chat-answer-text">{record.answer}</div>
+                {record.citations?.length ? (
+                  <div className="chat-citations" aria-label="Answer citations">
+                    {record.citations.map((citation) => (
+                      <button key={`${record.id}-${citation.segmentId}`} type="button" onClick={() => handleSeek(citation.startSec)}>
+                        <span>{citation.label}</span>
+                        <small>{citation.text}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="chat-message-actions">
+                  <button type="button" onClick={() => void copyChatAnswer(record)} title="Copy answer">
+                    {copiedChatMessageId === record.id ? <Check size={15} /> : <Copy size={15} />}
+                  </button>
+                  <button type="button" onClick={() => setActiveAiSaveMenuId(activeAiSaveMenuId === record.id ? null : record.id)} title="Save to Notebook">
+                    <Bookmark size={15} />
+                  </button>
+                  <button type="button" onClick={() => void sendChatQuestion(record.question, { quote: record.quote ?? '', timestamp: selectedTimestamp })} title="Retry question" disabled={isAsking}>
+                    <RefreshCw size={15} />
+                  </button>
+                </div>
+                {activeAiSaveMenuId === record.id ? (
+                  <div className="chat-save-picker">
                     <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as Exclude<NoteType, 'highlight' | 'thought'>)}>
-                      <option value="explanation">Save as Explanation</option>
-                      <option value="keyIdea">Save as Key Idea</option>
-                      <option value="reviewQuestion">Save as Review Question</option>
+                      <option value="explanation">Explanation</option>
+                      <option value="keyIdea">Key Idea</option>
+                      <option value="reviewQuestion">Review Question</option>
                     </select>
-                    <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('ai', aiSaveType)}>
+                    <button type="button" onClick={() => void saveAiResponseAsNote(record, aiSaveType)}>
                       Save
                     </button>
                   </div>
                 ) : null}
-              </div>
-            ) : null}
-          </article>
-        ) : null}
+                {showFollowUps ? (
+                  <div className="chat-followups">
+                    {record.followUps?.map((question) => (
+                      <button key={question} type="button" onClick={() => void sendChatQuestion(question, { quote: '', timestamp: selectedTimestamp })} disabled={isAsking}>
+                        {question}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            </div>
+          )
+        })}
 
-        {recordsToShow.length ? (
-          recordsToShow.map((record) => (
-            <article key={record.id} className="chat-card chat-card--record">
-              <span>{new Date(record.createdAt).toLocaleString()}</span>
-              <strong className="chat-card__question">{record.question}</strong>
-              {record.quote ? <blockquote className="chat-quote">{record.quote}</blockquote> : null}
-              <p>{record.answer}</p>
+        {pendingChatRequest ? (
+          <div className="chat-exchange">
+            <article className="chat-message chat-message--user">
+              <p>{pendingChatRequest.question}</p>
+              {pendingChatRequest.quote ? <span>Using subtitle context</span> : null}
             </article>
-          ))
+            <article className="chat-message chat-message--assistant chat-message--loading">
+              <Loader2 size={16} />
+              <p>Kimi is thinking...</p>
+            </article>
+          </div>
         ) : null}
 
-        {!hasLiveAnswer && !recordsToShow.length ? (
-          <article className="empty-card">
-            <strong>Ask about this video</strong>
-            <p>{emptyDescription}</p>
-          </article>
+        {failedChatRequest ? (
+          <div className="chat-exchange">
+            <article className="chat-message chat-message--user">
+              <p>{failedChatRequest.question}</p>
+              {failedChatRequest.quote ? <span>Using subtitle context</span> : null}
+            </article>
+            <article className="chat-message chat-message--assistant chat-message--error">
+              <p>{failedChatRequest.message}</p>
+              <button type="button" onClick={() => handleRetryChat(failedChatRequest)} disabled={isAsking}>
+                <RefreshCw size={14} />
+                Retry
+              </button>
+            </article>
+          </div>
         ) : null}
       </div>
     )
@@ -2853,33 +3041,53 @@ function App() {
 
               {rightTab === 'chat' ? (
                 <div className="detail-panel detail-panel--chat">
-                  {renderChatThread('Highlight transcript text, choose Ask AI, then refine the question here.')}
+                  {renderChatThread()}
 
                   {shouldShowChatSuggestions ? (
-                    <>
-                      <p className="panel-kicker">Suggested prompts</p>
-                      <div className="chat-suggestions">
-                        {askSuggestions.map((suggestion) => (
-                          <button key={suggestion} className="chip-button chip-button--prompt" type="button" onClick={() => setChatPrompt(suggestion)}>
-                            <Sparkles size={14} />
-                            <span>{suggestion}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
+                    <div className="chat-suggestions">
+                      {askSuggestions.map((suggestion) => (
+                        <button key={suggestion} className="chip-button chip-button--prompt" type="button" onClick={() => void sendChatQuestion(suggestion, { quote: '', timestamp: selectedTimestamp })}>
+                          <Sparkles size={14} />
+                          <span>{suggestion}</span>
+                        </button>
+                      ))}
+                    </div>
                   ) : null}
 
                   <section className="meta-section chat-composer-section">
-                    <p>Ask about this video</p>
+                    {chatContextQuote ? (
+                      <div className="chat-context-pill">
+                        <span>Using subtitle · {chatContextSelection?.timestamp ?? selectedTimestamp}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChatContextSelection(null)
+                            setTranscriptSelection(null)
+                            clearNativeSelection()
+                          }}
+                          aria-label="Clear subtitle context"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ) : null}
                     <div className="chat-composer">
                       <textarea
                         ref={chatTextareaRef}
                         value={chatPrompt}
                         onChange={(event) => setChatPrompt(event.target.value)}
-                        placeholder="Ask about this video, or highlight transcript text and choose Ask AI."
+                        onKeyDown={handleChatKeyDown}
+                        onCompositionStart={() => {
+                          isChatComposingRef.current = true
+                        }}
+                        onCompositionEnd={() => {
+                          isChatComposingRef.current = false
+                        }}
+                        placeholder="Ask about this video..."
+                        disabled={isAsking}
                       />
-                      <button className="secondary-button secondary-button--strong" type="button" onClick={handleAskAi} disabled={isAsking}>
-                        {isAsking ? 'Sending...' : 'Send'}
+                      <button className="chat-send-button" type="button" onClick={handleAskAi} disabled={isAsking || !chatPrompt.trim()} title="Send">
+                        {isAsking ? <Loader2 size={17} /> : <Send size={17} />}
                       </button>
                     </div>
                   </section>

@@ -203,6 +203,8 @@ function rowToConversation(row) {
     question: row.question,
     quote: row.quote ?? '',
     answer: row.answer,
+    citations: Array.isArray(row.citations) ? row.citations : [],
+    followUps: Array.isArray(row.follow_ups) ? row.follow_ups : [],
     createdAt: row.created_at,
   }
 }
@@ -356,11 +358,86 @@ function groupTranscriptLines(segments) {
   }))
 }
 
-function transcriptContext(video) {
+function transcriptContext(video, limit = 160) {
   return (video.transcript ?? [])
-    .slice(0, 120)
-    .map((segment) => `[${formatDuration(segment.startSec)}] ${segment.text}`)
+    .slice(0, limit)
+    .map((segment) => {
+      const segmentId = segment.id ?? `segment-${segment.startSec}`
+      return `[${segmentId} | ${formatDuration(segment.startSec)}-${formatDuration(segment.endSec)}] ${segment.text}`
+    })
     .join('\n')
+}
+
+function parseStructuredAiResponse(rawAnswer) {
+  const raw = String(rawAnswer ?? '').trim()
+  if (!raw) {
+    return { answer: 'No answer returned.', citations: [], followUps: [] }
+  }
+
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  const candidate = fenced?.[1] ?? raw
+
+  try {
+    const parsed = JSON.parse(candidate)
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Structured response is not an object.')
+    }
+
+    const answer = String(parsed.answer ?? parsed.content ?? '').trim()
+    return {
+      answer: answer || raw,
+      citations: Array.isArray(parsed.citations) ? parsed.citations : [],
+      followUps: Array.isArray(parsed.followUps) ? parsed.followUps : Array.isArray(parsed.follow_ups) ? parsed.follow_ups : [],
+    }
+  } catch {
+    return { answer: raw, citations: [], followUps: [] }
+  }
+}
+
+function normalizeCitation(candidate, video) {
+  if (!candidate || typeof candidate !== 'object') {
+    return null
+  }
+
+  const transcript = Array.isArray(video.transcript) ? video.transcript : []
+  const requestedId = String(candidate.segmentId ?? candidate.segment_id ?? candidate.id ?? '').trim()
+  const startNumber = Number(candidate.startSec ?? candidate.start_sec ?? candidate.start)
+  const segment = transcript.find((item) => item.id === requestedId)
+    ?? transcript.find((item) => Number.isFinite(startNumber) && Math.abs(Number(item.startSec) - startNumber) <= 2)
+
+  if (!segment) {
+    return null
+  }
+
+  return {
+    segmentId: segment.id,
+    startSec: Number(segment.startSec),
+    endSec: Number(segment.endSec),
+    label: `${formatDuration(segment.startSec)}-${formatDuration(segment.endSec)}`,
+    text: String(candidate.text ?? segment.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 360),
+  }
+}
+
+function normalizeCitations(citations, video) {
+  const seen = new Set()
+  return citations
+    .map((citation) => normalizeCitation(citation, video))
+    .filter((citation) => {
+      if (!citation || seen.has(citation.segmentId)) {
+        return false
+      }
+      seen.add(citation.segmentId)
+      return true
+    })
+    .slice(0, 5)
+}
+
+function normalizeFollowUps(followUps) {
+  return followUps
+    .map((question) => String(question ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((question, index, array) => array.indexOf(question) === index)
+    .slice(0, 3)
 }
 
 async function fetchOembed(url) {
@@ -562,16 +639,34 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing video or question.' })
     }
 
-    const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: kimiModel,
-        thinking: { type: 'disabled' },
-        messages: [
+    const messages = shouldSaveConversation
+      ? [
+          {
+            role: 'system',
+            content: [
+              'You are an English long-video learning assistant for a NotebookLM-style source-grounded chat.',
+              'Answer in concise Chinese, grounded only in the provided video transcript.',
+              'Return strict JSON only. Do not wrap it in Markdown.',
+              'JSON shape: {"answer":"...", "citations":[{"segmentId":"yt-1","text":"short cited transcript text"}], "followUps":["..."]}.',
+              'Use 1-4 citations when the transcript supports the answer. Every citation segmentId must come from the transcript context.',
+              'If useful, include the English phrase being explained inside the Chinese answer.',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: [
+              `Video title: ${video.title}`,
+              `Channel: ${video.channel}`,
+              quote ? `Selected subtitle context: ${quote}` : '',
+              `Question: ${question}`,
+              'Transcript context:',
+              transcriptContext(video),
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          },
+        ]
+      : [
           {
             role: 'system',
             content:
@@ -585,12 +680,23 @@ app.post('/api/ask', requireAuth, async (req, res) => {
               quote ? `Highlighted passage: ${quote}` : '',
               `Question: ${question}`,
               'Transcript:',
-              transcriptContext(video),
+              transcriptContext(video, 120),
             ]
               .filter(Boolean)
               .join('\n\n'),
           },
-        ],
+        ]
+
+    const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: kimiModel,
+        thinking: { type: 'disabled' },
+        messages,
       }),
     })
 
@@ -599,7 +705,13 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       return res.status(response.status).json({ error: data?.error?.message ?? 'Kimi request failed.' })
     }
 
-    const answer = data?.choices?.[0]?.message?.content ?? 'No answer returned.'
+    const rawAnswer = data?.choices?.[0]?.message?.content ?? 'No answer returned.'
+    const structuredAnswer = shouldSaveConversation
+      ? parseStructuredAiResponse(rawAnswer)
+      : { answer: rawAnswer, citations: [], followUps: [] }
+    const answer = structuredAnswer.answer
+    const citations = normalizeCitations(structuredAnswer.citations, video)
+    const followUps = normalizeFollowUps(structuredAnswer.followUps)
     const conversation = shouldSaveConversation
       ? {
           id: `chat-${crypto.randomUUID()}`,
@@ -609,12 +721,14 @@ app.post('/api/ask', requireAuth, async (req, res) => {
           question,
           quote,
           answer,
+          citations,
+          follow_ups: followUps,
           created_at: new Date().toISOString(),
         }
       : null
 
     if (!conversation) {
-      return res.json({ answer, conversation: null })
+      return res.json({ answer, citations, followUps, conversation: null })
     }
 
     const db = requestSupabase(req)
@@ -628,7 +742,7 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       return res.status(500).json({ error: conversationError.message })
     }
 
-    res.json({ answer, conversation: rowToConversation(storedConversation) })
+    res.json({ answer, citations, followUps, conversation: rowToConversation(storedConversation) })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to ask AI.'
     res.status(500).json({ error: message })
