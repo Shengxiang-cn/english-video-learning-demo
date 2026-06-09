@@ -2959,7 +2959,70 @@ function App() {
 
           </div>
         ) : screen === 'reader' ? (
-	          <div
+          <>
+            <header className="reader-topbar">
+              <button
+                className="reader-topbar__brand"
+                type="button"
+                aria-label="Back to home"
+                onClick={() => setScreen('home')}
+              >
+                <span>Vist</span>
+                <span>观知</span>
+              </button>
+
+              <div className="reader-topbar__account">
+                {currentUser ? (
+                  <button
+                    className="reader-account-button"
+                    type="button"
+                    aria-label="User menu"
+                    aria-expanded={showUserMenu}
+                    onClick={() => setShowUserMenu((current) => !current)}
+                  >
+                    <span>{currentUser.name.slice(0, 1).toUpperCase()}</span>
+                  </button>
+                ) : (
+                  <button
+                    className="reader-signin-button"
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login')
+                      setAuthError('')
+                    }}
+                  >
+                    Sign In
+                  </button>
+                )}
+
+                {currentUser && showUserMenu ? (
+                  <div className="account-menu account-menu--reader">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserMenu(false)
+                        void handleLogout()
+                      }}
+                    >
+                      <LogOut size={16} />
+                      <span>退出登录</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserMenu(false)
+                        setToast('联系我们：support@vist.example')
+                      }}
+                    >
+                      <MessageCircle size={16} />
+                      <span>联系我们</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </header>
+
+            <div
               ref={readerLayoutRef}
               className="reader-layout"
               style={readerLeftWidth ? { gridTemplateColumns: `${readerLeftWidth}px minmax(340px, 1fr)` } : undefined}
@@ -3280,7 +3343,8 @@ function App() {
                 </div>
               ) : null}
             </aside>
-          </div>
+            </div>
+          </>
         ) : screen === 'notes' ? (
           renderNotesPage()
         ) : (

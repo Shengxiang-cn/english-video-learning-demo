@@ -156,6 +156,71 @@
   min-height: 46px;
 }
 
+.reader-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 72px;
+  height: 72px;
+  padding: 0 28px;
+  background: #fff;
+  border-bottom: 1px solid #dfe6ef;
+}
+
+.reader-topbar__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+  color: #1f2b3a;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  padding: 0;
+}
+
+.reader-topbar__account {
+  position: relative;
+}
+
+.reader-account-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #d8e0eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #263141;
+  box-shadow: 0 10px 24px rgba(24, 31, 40, 0.08);
+}
+
+.reader-account-button span {
+  font-weight: 800;
+}
+
+.reader-signin-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  background: #05070a;
+  color: #fff;
+  padding: 0 20px;
+  font-weight: 800;
+}
+
+.account-menu--reader {
+  left: auto;
+  right: 0;
+  bottom: auto;
+  top: 50px;
+  width: 164px;
+}
+
 .desktop-app--reader .sidebar,
 .desktop-app--reader .workspace__topbar,
 .desktop-app--reader .reader-main__toolbar {
@@ -886,7 +951,7 @@
   gap: 24px;
   min-height: 0;
   width: 100vw;
-  height: 100vh;
+  height: calc(100vh - 72px);
   padding: 24px;
   background: #f3f6fb;
 }
@@ -908,7 +973,7 @@
 .desktop-app--reader .right-pane {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 48px);
+  height: 100%;
   overflow: hidden;
   border: 1px solid #d9e2ef;
   border-radius: 18px;
@@ -941,7 +1006,7 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  height: calc(100vh - 48px);
+  height: 100%;
   overflow: auto;
   padding: 0;
   background: transparent;
@@ -3127,7 +3192,7 @@
 
   .desktop-app--reader .reader-scroll,
   .desktop-app--reader .right-pane {
-    height: calc(100vh - 32px);
+    height: 100%;
   }
 
   .study-player-card {
@@ -3179,6 +3244,13 @@
     bottom: 18px;
     width: 168px;
   }
+
+  .account-menu--reader {
+    left: auto;
+    right: 0;
+    bottom: auto;
+    top: 50px;
+  }
 }
 
 @media (max-width: 960px) {
@@ -3199,7 +3271,7 @@
 
   .desktop-app--reader .reader-scroll,
   .desktop-app--reader .right-pane {
-    height: calc(100vh - 24px);
+    height: 100%;
   }
 
   .desktop-app--reader .right-pane__tabs {
