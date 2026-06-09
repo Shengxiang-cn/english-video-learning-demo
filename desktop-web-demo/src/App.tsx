@@ -982,7 +982,7 @@ function App() {
   const chatContextQuote = chatContextSelection?.quote || selectedQuote
   const activeContextSegment = activeSegmentIndex >= 0 ? transcript[activeSegmentIndex] : null
   const chatContextLabel = chatContextSelection
-    ? `基于选中字幕 · ${chatContextSelection.timestamp}`
+    ? `选中字幕 · ${chatContextSelection.timestamp}`
     : activeContextSegment
       ? `基于当前时间点 · ${formatTime(currentPosition)}`
       : '基于整条视频字幕'
@@ -2403,8 +2403,11 @@ function App() {
     const selection = transcriptSelection
     if (selection) {
       setChatContextSelection(selection)
+      setChatPrompt(selection.quote)
+      setIsChatContextOpen(false)
+    } else {
+      setChatPrompt(selectedQuote)
     }
-    setChatPrompt('')
     setActiveAiSaveMenuId(null)
     setRightTab('chat')
     clearNativeSelection()
