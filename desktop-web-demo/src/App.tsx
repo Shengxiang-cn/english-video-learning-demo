@@ -2138,7 +2138,7 @@ function App() {
     setFailedChatRequest(null)
     setPendingChatRequest(pendingRequest)
     setChatPrompt('')
-    setToast('Asking Kimi about this video...')
+    setToast('Asking AI about this video...')
 
     try {
       const accessToken = currentUser ? await getAccessToken() : undefined
@@ -2191,7 +2191,7 @@ function App() {
       setPendingChatRequest(null)
       setChatContextSelection(null)
       clearNativeSelection()
-      setToast('Kimi answer is ready.')
+      setToast('AI answer is ready.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI request failed.'
       setFailedChatRequest({
@@ -2950,7 +2950,7 @@ function App() {
             </article>
             <article className="chat-message chat-message--assistant chat-message--loading">
               <Loader2 size={16} />
-              <p>Kimi is thinking...</p>
+              <p>AI is thinking...</p>
             </article>
           </div>
         ) : null}
