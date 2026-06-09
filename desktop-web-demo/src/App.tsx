@@ -23,7 +23,6 @@ import {
   Star,
   StickyNote,
   ThumbsUp,
-  UserCircle,
   Video,
   X,
 } from 'lucide-react'
@@ -1908,6 +1907,67 @@ function App() {
     lastSavedProgressRef.current = {}
   }
 
+  function renderAccountControl({
+    className,
+    signInMessage,
+    signInAction = null,
+  }: {
+    className: string
+    signInMessage: string
+    signInAction?: PendingAction | null
+  }) {
+    const initial = currentUser?.name?.trim().slice(0, 1) || currentUser?.email.slice(0, 1) || 'U'
+
+    return (
+      <div className={className}>
+        {currentUser ? (
+          <button
+            className="reader-account-button"
+            type="button"
+            aria-label="User menu"
+            aria-expanded={showUserMenu}
+            onClick={() => setShowUserMenu((current) => !current)}
+          >
+            <span>{initial.toUpperCase()}</span>
+          </button>
+        ) : (
+          <button
+            className="reader-signin-button"
+            type="button"
+            onClick={() => openAuthModal(signInMessage, signInAction)}
+          >
+            Sign In
+          </button>
+        )}
+
+        {currentUser && showUserMenu ? (
+          <div className="account-menu">
+            <button
+              type="button"
+              onClick={() => {
+                setShowUserMenu(false)
+                void handleLogout()
+              }}
+            >
+              <LogOut size={16} />
+              <span>退出登录</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowUserMenu(false)
+                setToast('联系我们：support@vist.example')
+              }}
+            >
+              <MessageCircle size={16} />
+              <span>联系我们</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
   async function handleImportUrl() {
     if (!currentUser) {
       openAuthModal('登录后保存视频到你的学习库，并继续学习进度。', { type: 'save-video' })
@@ -3245,60 +3305,12 @@ function App() {
             })}
           </div>
         </nav>
-
-        <div className="sidebar__account">
-          {currentUser ? (
-            <button
-              className="account-button"
-              type="button"
-              aria-label="User menu"
-              aria-expanded={showUserMenu}
-              onClick={() => setShowUserMenu((current) => !current)}
-            >
-              <span className="account-button__avatar">
-                <UserCircle size={22} />
-              </span>
-              <span className="account-button__text">我的账户</span>
-            </button>
-          ) : (
-            <button
-              className="account-button"
-              type="button"
-              onClick={() => openAuthModal('登录后保存你的学习进度、笔记和 AI 对话。')}
-            >
-              <span className="account-button__avatar">
-                <UserCircle size={22} />
-              </span>
-              <span className="account-button__text">Sign In</span>
-            </button>
-          )}
-
-          {currentUser && showUserMenu ? (
-            <div className="account-menu">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowUserMenu(false)
-                  void handleLogout()
-                }}
-              >
-                <LogOut size={16} />
-                <span>退出登录</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowUserMenu(false)
-                  setToast('联系我们：support@vist.example')
-                }}
-              >
-                <MessageCircle size={16} />
-                <span>联系我们</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
       </aside>
+
+      {screen !== 'reader' ? renderAccountControl({
+        className: 'global-account',
+        signInMessage: '登录后保存你的学习进度、笔记和 AI 对话。',
+      }) : null}
 
       <section className="workspace">
         {screen === 'library' ? (
@@ -3467,52 +3479,11 @@ function App() {
                 </div>
               ) : null}
 
-              <div className="reader-topbar__account">
-                {currentUser ? (
-                  <button
-                    className="reader-account-button"
-                    type="button"
-                    aria-label="User menu"
-                    aria-expanded={showUserMenu}
-                    onClick={() => setShowUserMenu((current) => !current)}
-                  >
-                    <span>{currentUser.name.slice(0, 1).toUpperCase()}</span>
-                  </button>
-                ) : (
-                  <button
-                    className="reader-signin-button"
-                    type="button"
-                    onClick={() => openAuthModal('登录后可以保存这个临时视频的学习进度和笔记。', { type: 'save-video' })}
-                  >
-                    Sign In
-                  </button>
-                )}
-
-                {currentUser && showUserMenu ? (
-                  <div className="account-menu account-menu--reader">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowUserMenu(false)
-                        void handleLogout()
-                      }}
-                    >
-                      <LogOut size={16} />
-                      <span>退出登录</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowUserMenu(false)
-                        setToast('联系我们：support@vist.example')
-                      }}
-                    >
-                      <MessageCircle size={16} />
-                      <span>联系我们</span>
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              {renderAccountControl({
+                className: 'reader-topbar__account',
+                signInMessage: '登录后可以保存这个临时视频的学习进度和笔记。',
+                signInAction: { type: 'save-video' },
+              })}
             </header>
 
             <div
