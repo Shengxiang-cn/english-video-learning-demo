@@ -1,7 +1,6 @@
 import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
-import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
@@ -31,7 +30,7 @@ const supabaseAuth = isSupabaseConfigured
 
 const videosTable = 'learning_videos'
 const notesTable = 'learning_notes'
-const conversationsTable = 'learning_conversations'
+const transcriptChunksTable = 'learning_transcript_chunks'
 
 app.use(cors())
 app.use(express.json({ limit: '1mb' }))
@@ -195,20 +194,6 @@ function rowToNote(row) {
   }
 }
 
-function rowToConversation(row) {
-  return {
-    id: row.id,
-    videoId: row.video_id,
-    videoTitle: row.video_title ?? undefined,
-    question: row.question,
-    quote: row.quote ?? '',
-    answer: row.answer,
-    citations: Array.isArray(row.citations) ? row.citations : [],
-    followUps: Array.isArray(row.follow_ups) ? row.follow_ups : [],
-    createdAt: row.created_at,
-  }
-}
-
 function parseYoutubeId(input) {
   try {
     const url = new URL(input)
@@ -358,9 +343,10 @@ function groupTranscriptLines(segments) {
   }))
 }
 
-function transcriptContext(video, limit = 160) {
-  return (video.transcript ?? [])
-    .slice(0, limit)
+function transcriptContext(video, limit = null) {
+  const transcript = video.transcript ?? []
+  const segments = Number.isFinite(limit) ? transcript.slice(0, limit) : transcript
+  return segments
     .map((segment) => {
       const segmentId = segment.id ?? `segment-${segment.startSec}`
       return `[${segmentId} | ${formatDuration(segment.startSec)}-${formatDuration(segment.endSec)}] ${segment.text}`
@@ -368,14 +354,114 @@ function transcriptContext(video, limit = 160) {
     .join('\n')
 }
 
+function estimateTokens(text) {
+  return Math.ceil(String(text ?? '').length / 4)
+}
+
+function formatTranscriptForPrompt(transcript) {
+  return transcript
+    .map((segment) => {
+      const startSec = Math.max(0, Math.round(Number(segment.startSec) || 0))
+      const endSec = Math.max(startSec, Math.round(Number(segment.endSec) || startSec))
+      return `[${formatDuration(startSec)}-${formatDuration(endSec)}] ${String(segment.text ?? '').replace(/\s+/g, ' ').trim()}`
+    })
+    .filter((line) => !line.endsWith('] '))
+    .join('\n')
+}
+
+function buildTranscriptContext({ transcript, strategy = 'full' } = {}) {
+  const cleanTranscript = Array.isArray(transcript) ? transcript : []
+
+  if (strategy === 'hybrid') {
+    return {
+      strategy,
+      context: formatTranscriptForPrompt(cleanTranscript),
+      tokenEstimate: estimateTokens(formatTranscriptForPrompt(cleanTranscript)),
+      segmentCount: cleanTranscript.length,
+    }
+  }
+
+  const context = formatTranscriptForPrompt(cleanTranscript)
+  return {
+    strategy: 'full',
+    context,
+    tokenEstimate: estimateTokens(context),
+    segmentCount: cleanTranscript.length,
+  }
+}
+
+function createTranscriptChunks(transcript, userId, videoId, windowSec = 90) {
+  const chunks = []
+  let current = null
+
+  for (const segment of Array.isArray(transcript) ? transcript : []) {
+    const startSec = Math.max(0, Math.round(Number(segment.startSec) || 0))
+    const endSec = Math.max(startSec, Math.round(Number(segment.endSec) || startSec))
+    const text = String(segment.text ?? '').replace(/\s+/g, ' ').trim()
+    const segmentId = String(segment.id ?? `segment-${startSec}`)
+
+    if (!text) continue
+
+    if (!current || (startSec - current.start_sec >= windowSec && current.text.length > 0)) {
+      if (current) chunks.push(current)
+      current = {
+        user_id: userId,
+        video_id: videoId,
+        chunk_index: chunks.length,
+        start_sec: startSec,
+        end_sec: endSec,
+        text: text,
+        segment_ids: [segmentId],
+        token_estimate: estimateTokens(text),
+      }
+      continue
+    }
+
+    current.end_sec = Math.max(current.end_sec, endSec)
+    current.text = `${current.text}\n${text}`
+    current.segment_ids.push(segmentId)
+    current.token_estimate = estimateTokens(current.text)
+  }
+
+  if (current) chunks.push(current)
+  return chunks
+}
+
+async function replaceTranscriptChunks(db, userId, videoId, transcript) {
+  const { error: deleteError } = await db
+    .from(transcriptChunksTable)
+    .delete()
+    .eq('user_id', userId)
+    .eq('video_id', videoId)
+
+  if (deleteError) {
+    throw deleteError
+  }
+
+  const chunks = createTranscriptChunks(transcript, userId, videoId)
+  if (chunks.length === 0) {
+    return
+  }
+
+  const { error: insertError } = await db.from(transcriptChunksTable).insert(chunks)
+  if (insertError) {
+    throw insertError
+  }
+}
+
 function parseStructuredAiResponse(rawAnswer) {
   const raw = String(rawAnswer ?? '').trim()
   if (!raw) {
-    return { answer: 'No answer returned.', citations: [], followUps: [] }
+    return { answer: 'No answer returned.', timestamps: [], citations: [], followUps: [], saveCandidates: [] }
   }
 
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
-  const candidate = fenced?.[1] ?? raw
+  const withoutFence = fenced?.[1] ?? raw
+  const objectStart = withoutFence.indexOf('{')
+  const objectEnd = withoutFence.lastIndexOf('}')
+  const candidate = objectStart >= 0 && objectEnd > objectStart
+    ? withoutFence.slice(objectStart, objectEnd + 1)
+    : withoutFence
 
   try {
     const parsed = JSON.parse(candidate)
@@ -386,12 +472,91 @@ function parseStructuredAiResponse(rawAnswer) {
     const answer = String(parsed.answer ?? parsed.content ?? '').trim()
     return {
       answer: answer || raw,
+      timestamps: Array.isArray(parsed.timestamps) ? parsed.timestamps : [],
       citations: Array.isArray(parsed.citations) ? parsed.citations : [],
       followUps: Array.isArray(parsed.followUps) ? parsed.followUps : Array.isArray(parsed.follow_ups) ? parsed.follow_ups : [],
+      saveCandidates: Array.isArray(parsed.saveCandidates) ? parsed.saveCandidates : Array.isArray(parsed.save_candidates) ? parsed.save_candidates : [],
     }
   } catch {
-    return { answer: raw, citations: [], followUps: [] }
+    return { answer: raw, timestamps: [], citations: [], followUps: [], saveCandidates: [] }
   }
+}
+
+function parseTimestampToSeconds(value) {
+  const raw = String(value ?? '').trim()
+  const match = raw.match(/(\d{1,2}:)?\d{1,2}:\d{2}/)
+  if (!match) {
+    const numeric = Number(raw)
+    return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : null
+  }
+
+  const parts = match[0].split(':').map(Number)
+  if (parts.some((part) => !Number.isFinite(part))) {
+    return null
+  }
+
+  if (parts.length === 3) {
+    return Math.max(0, parts[0] * 3600 + parts[1] * 60 + parts[2])
+  }
+
+  return Math.max(0, parts[0] * 60 + parts[1])
+}
+
+function extractTimestamps(answer) {
+  return Array.from(String(answer ?? '').matchAll(/(?:\d{1,2}:)?\d{1,2}:\d{2}/g), (match) => match[0])
+}
+
+function findClosestSegment(transcript, timestampSec) {
+  let closest = null
+  let closestDistance = Number.POSITIVE_INFINITY
+
+  for (const segment of transcript) {
+    const startSec = Number(segment.startSec)
+    const endSec = Number(segment.endSec)
+    if (!Number.isFinite(startSec) || !Number.isFinite(endSec)) continue
+
+    const distance = timestampSec >= startSec && timestampSec <= endSec
+      ? 0
+      : Math.min(Math.abs(timestampSec - startSec), Math.abs(timestampSec - endSec))
+
+    if (distance < closestDistance) {
+      closest = segment
+      closestDistance = distance
+    }
+  }
+
+  return closest
+}
+
+function citationsFromTimestamps(timestamps, answer, video) {
+  const transcript = Array.isArray(video.transcript) ? video.transcript : []
+  const candidates = (Array.isArray(timestamps) && timestamps.length ? timestamps : extractTimestamps(answer))
+    .map(parseTimestampToSeconds)
+    .filter((timestamp) => timestamp !== null)
+
+  const seen = new Set()
+  const citations = []
+
+  for (const timestampSec of candidates) {
+    const segment = findClosestSegment(transcript, timestampSec)
+    if (!segment) continue
+
+    const segmentId = String(segment.id ?? `segment-${segment.startSec}`)
+    if (seen.has(segmentId)) continue
+
+    seen.add(segmentId)
+    citations.push({
+      segmentId,
+      startSec: Number(segment.startSec),
+      endSec: Number(segment.endSec),
+      label: `${formatDuration(segment.startSec)}-${formatDuration(segment.endSec)}`,
+      text: String(segment.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 360),
+    })
+
+    if (citations.length >= 5) break
+  }
+
+  return citations
 }
 
 function normalizeCitation(candidate, video) {
@@ -433,11 +598,38 @@ function normalizeCitations(citations, video) {
 }
 
 function normalizeFollowUps(followUps) {
-  return followUps
+  return (Array.isArray(followUps) ? followUps : [])
     .map((question) => String(question ?? '').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .filter((question, index, array) => array.indexOf(question) === index)
     .slice(0, 3)
+}
+
+function normalizeSaveCandidates(saveCandidates) {
+  const allowedTypes = new Set(['explanation', 'keyIdea', 'reviewQuestion'])
+  return (Array.isArray(saveCandidates) ? saveCandidates : [])
+    .flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object') return []
+      const type = String(candidate.type ?? '').trim()
+      const content = String(candidate.content ?? '').replace(/\s+/g, ' ').trim()
+      if (!allowedTypes.has(type) || !content) return []
+      return [{
+        type,
+        content: content.slice(0, 1600),
+        quote: String(candidate.quote ?? '').replace(/\s+/g, ' ').trim().slice(0, 600),
+        timestamp: String(candidate.timestamp ?? '').trim().slice(0, 16),
+      }]
+    })
+    .slice(0, 5)
+}
+
+function normalizeSelectedSubtitle(value) {
+  if (!value || typeof value !== 'object') return null
+  const text = String(value.text ?? '').replace(/\s+/g, ' ').trim()
+  const startSec = Math.max(0, Math.round(Number(value.startSec ?? value.start_sec) || 0))
+  const endSec = Math.max(startSec, Math.round(Number(value.endSec ?? value.end_sec) || startSec))
+  if (!text) return null
+  return { text: text.slice(0, 2000), startSec, endSec }
 }
 
 async function fetchOembed(url) {
@@ -484,13 +676,12 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/library', requireAuth, async (req, res) => {
   const db = requestSupabase(req)
-  const [videosResult, notesResult, conversationsResult] = await Promise.all([
+  const [videosResult, notesResult] = await Promise.all([
     db.from(videosTable).select('*').order('saved_at', { ascending: false }),
     db.from(notesTable).select('*').order('saved_at', { ascending: false }),
-    db.from(conversationsTable).select('*').order('created_at', { ascending: false }),
   ])
 
-  const error = videosResult.error ?? notesResult.error ?? conversationsResult.error
+  const error = videosResult.error ?? notesResult.error
   if (error) {
     return res.status(500).json({ error: error.message })
   }
@@ -498,7 +689,6 @@ app.get('/api/library', requireAuth, async (req, res) => {
   res.json({
     videos: (videosResult.data ?? []).map(rowToVideo),
     notes: (notesResult.data ?? []).map(rowToNote),
-    conversations: (conversationsResult.data ?? []).map(rowToConversation),
   })
 })
 
@@ -555,6 +745,8 @@ app.post('/api/youtube/import', requireAuth, async (req, res) => {
     if (error) {
       return res.status(500).json({ error: error.message })
     }
+
+    await replaceTranscriptChunks(db, req.user.id, data.id, data.transcript ?? [])
 
     res.json(rowToVideo(data))
   } catch (error) {
@@ -630,62 +822,138 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       return res.status(500).json({ error: 'KIMI_API_KEY is not configured on the server.' })
     }
 
-    const video = req.body?.video
+    const videoId = String(req.body?.videoId ?? req.body?.video_id ?? '').trim()
     const question = String(req.body?.question ?? '').trim()
-    const quote = String(req.body?.quote ?? '').trim()
-    const shouldSaveConversation = req.body?.saveConversation === true
+    const selectedSubtitle = normalizeSelectedSubtitle(req.body?.selectedSubtitle ?? req.body?.selected_subtitle)
+    const currentPlaybackTime = Math.max(0, Math.round(Number(req.body?.currentPlaybackTime ?? req.body?.current_playback_time) || 0))
+    const answerLanguage = String(req.body?.answerLanguage ?? req.body?.answer_language ?? 'zh-CN').trim() || 'zh-CN'
+    const purpose = String(req.body?.purpose ?? 'ask').trim()
 
-    if (!video || !question) {
-      return res.status(400).json({ error: 'Missing video or question.' })
+    if (!videoId || !question) {
+      return res.status(400).json({ error: 'Missing videoId or question.' })
     }
 
-    const messages = shouldSaveConversation
+    const db = requestSupabase(req)
+
+    if (purpose === 'translate') {
+      if (!selectedSubtitle?.text) {
+        return res.status(400).json({ error: 'Missing lines to translate.' })
+      }
+
+      const messages = [
+        {
+          role: 'system',
+          content:
+            'You translate numbered transcript lines. Return only translated numbered lines. Do not summarize, merge, explain, or add extra text.',
+        },
+        {
+          role: 'user',
+          content: [
+            `Target language: ${answerLanguage}`,
+            question,
+            'Lines:',
+            selectedSubtitle.text,
+          ].join('\n\n'),
+        },
+      ]
+
+      const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: kimiModel,
+          thinking: { type: 'disabled' },
+          messages,
+        }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        return res.status(response.status).json({ error: data?.error?.message ?? 'Kimi request failed.' })
+      }
+
+      return res.json({
+        answer: data?.choices?.[0]?.message?.content ?? 'No answer returned.',
+        citations: [],
+        followUps: [],
+        saveCandidates: [],
+      })
+    }
+
+    const { data: videoRow, error: videoError } = await db
+      .from(videosTable)
+      .select('id,title,channel,transcript,duration_sec,tags')
+      .eq('user_id', req.user.id)
+      .eq('id', videoId)
+      .maybeSingle()
+
+    if (videoError) {
+      return res.status(500).json({ error: videoError.message })
+    }
+
+    if (!videoRow) {
+      return res.status(404).json({ error: 'Video not found.' })
+    }
+
+    const video = rowToVideo(videoRow)
+    const transcript = Array.isArray(video.transcript) ? video.transcript : []
+    if (transcript.length === 0) {
+      return res.status(400).json({ error: 'This video does not have a transcript source.' })
+    }
+
+    const transcriptSource = buildTranscriptContext({ transcript, strategy: 'full' })
+    const selectedSubtitleBlock = selectedSubtitle
       ? [
-          {
-            role: 'system',
-            content: [
-              'You are an English long-video learning assistant for a NotebookLM-style source-grounded chat.',
-              'Answer in concise Chinese, grounded only in the provided video transcript.',
-              'Return strict JSON only. Do not wrap it in Markdown.',
-              'JSON shape: {"answer":"...", "citations":[{"segmentId":"yt-1","text":"short cited transcript text"}], "followUps":["..."]}.',
-              'Use 1-4 citations when the transcript supports the answer. Every citation segmentId must come from the transcript context.',
-              'If useful, include the English phrase being explained inside the Chinese answer.',
-            ].join(' '),
-          },
-          {
-            role: 'user',
-            content: [
-              `Video title: ${video.title}`,
-              `Channel: ${video.channel}`,
-              quote ? `Selected subtitle context: ${quote}` : '',
-              `Question: ${question}`,
-              'Transcript context:',
-              transcriptContext(video),
-            ]
-              .filter(Boolean)
-              .join('\n\n'),
-          },
+          `Focus subtitle timestamp: ${formatDuration(selectedSubtitle.startSec)}-${formatDuration(selectedSubtitle.endSec)}`,
+          `Focus subtitle text: ${selectedSubtitle.text}`,
+        ].join('\n')
+      : ''
+
+    const currentSegment = findClosestSegment(transcript, currentPlaybackTime)
+    const currentPlaybackBlock = currentSegment
+      ? [
+          `Current playback time: ${formatDuration(currentPlaybackTime)}`,
+          `Nearest current subtitle: [${formatDuration(currentSegment.startSec)}-${formatDuration(currentSegment.endSec)}] ${currentSegment.text}`,
+        ].join('\n')
+      : `Current playback time: ${formatDuration(currentPlaybackTime)}`
+
+    const messages = [
+      {
+        role: 'system',
+        content: [
+          'You are a NotebookLM-style source-grounded video question answering assistant.',
+          'The transcript is the only source. Answer only from the transcript when discussing video content.',
+          `Answer language: ${answerLanguage}.`,
+          'If the selected subtitle is provided, treat it as focus context, but still use the full transcript as the source.',
+          'For factual claims about the video, include evidence timestamps naturally in the answer, such as [12:34].',
+          'Use Markdown only for simple paragraphs, bold text, bullet lists, numbered lists, blockquotes, and inline code.',
+          'Do not output Markdown tables or complex heading hierarchies.',
+          'Return strict JSON only. Do not wrap the JSON in Markdown code fences.',
+          'JSON shape: {"answer":"string","timestamps":["MM:SS"],"followUps":["string"],"saveCandidates":[{"type":"explanation|keyIdea|reviewQuestion","content":"string","quote":"string","timestamp":"MM:SS"}]}.',
+          'Return 1-5 timestamps that best support the answer. Use timestamps that appear in, or are strongly supported by, the transcript.',
+          'Explanation, keyIdea, and reviewQuestion are note types, not tags.',
+        ].join(' '),
+      },
+      {
+        role: 'user',
+        content: [
+          `Video title: ${video.title}`,
+          `Channel: ${video.channel}`,
+          currentPlaybackBlock,
+          selectedSubtitleBlock,
+          `Question: ${question}`,
+          `Transcript strategy: ${transcriptSource.strategy}`,
+          `Transcript token estimate: ${transcriptSource.tokenEstimate}`,
+          'Full transcript source:',
+          transcriptSource.context,
         ]
-      : [
-          {
-            role: 'system',
-            content:
-              'You are an English long-video learning assistant. Answer in concise Chinese, grounded only in the provided video transcript. If useful, include the English phrase being explained.',
-          },
-          {
-            role: 'user',
-            content: [
-              `Video title: ${video.title}`,
-              `Channel: ${video.channel}`,
-              quote ? `Highlighted passage: ${quote}` : '',
-              `Question: ${question}`,
-              'Transcript:',
-              transcriptContext(video, 120),
-            ]
-              .filter(Boolean)
-              .join('\n\n'),
-          },
-        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      },
+    ]
 
     const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
       method: 'POST',
@@ -706,43 +974,16 @@ app.post('/api/ask', requireAuth, async (req, res) => {
     }
 
     const rawAnswer = data?.choices?.[0]?.message?.content ?? 'No answer returned.'
-    const structuredAnswer = shouldSaveConversation
-      ? parseStructuredAiResponse(rawAnswer)
-      : { answer: rawAnswer, citations: [], followUps: [] }
+    const structuredAnswer = parseStructuredAiResponse(rawAnswer)
     const answer = structuredAnswer.answer
-    const citations = normalizeCitations(structuredAnswer.citations, video)
+    const citations = citationsFromTimestamps(structuredAnswer.timestamps, answer, video)
+      .concat(normalizeCitations(structuredAnswer.citations, video))
+      .filter((citation, index, array) => array.findIndex((item) => item.segmentId === citation.segmentId) === index)
+      .slice(0, 5)
     const followUps = normalizeFollowUps(structuredAnswer.followUps)
-    const conversation = shouldSaveConversation
-      ? {
-          id: `chat-${crypto.randomUUID()}`,
-          user_id: req.user.id,
-          video_id: video.id,
-          video_title: video.title,
-          question,
-          quote,
-          answer,
-          citations,
-          follow_ups: followUps,
-          created_at: new Date().toISOString(),
-        }
-      : null
+    const saveCandidates = normalizeSaveCandidates(structuredAnswer.saveCandidates)
 
-    if (!conversation) {
-      return res.json({ answer, citations, followUps, conversation: null })
-    }
-
-    const db = requestSupabase(req)
-    const { data: storedConversation, error: conversationError } = await db
-      .from(conversationsTable)
-      .insert(conversation)
-      .select('*')
-      .single()
-
-    if (conversationError) {
-      return res.status(500).json({ error: conversationError.message })
-    }
-
-    res.json({ answer, citations, followUps, conversation: rowToConversation(storedConversation) })
+    res.json({ answer, citations, followUps, saveCandidates })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to ask AI.'
     res.status(500).json({ error: message })
