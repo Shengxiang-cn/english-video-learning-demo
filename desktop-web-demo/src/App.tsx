@@ -201,6 +201,37 @@ type TranslationStatus = {
   lastError: string
 }
 
+function getAuthRedirectUrl() {
+  return typeof window === 'undefined' ? undefined : window.location.origin
+}
+
+function authErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Authentication failed.'
+  const normalized = message.toLowerCase()
+
+  if (normalized.includes('email not confirmed')) {
+    return '邮箱还没有确认。请先打开确认邮件里的链接，再回来登录。'
+  }
+
+  if (normalized.includes('invalid login credentials')) {
+    return '邮箱或密码不正确。如果刚注册，请先确认邮箱后再登录。'
+  }
+
+  if (normalized.includes('user already registered') || normalized.includes('already registered')) {
+    return '这个邮箱已经注册过了，请直接登录。'
+  }
+
+  if (normalized.includes('signup') && normalized.includes('disabled')) {
+    return '当前项目没有开启注册，请在 Supabase Auth 设置里允许 Email 注册。'
+  }
+
+  if (normalized.includes('expired') || normalized.includes('invalid')) {
+    return '登录状态已失效，请重新登录。'
+  }
+
+  return message
+}
+
 const defaultVideoMeta: VideoMeta = { status: 'inbox', isFavourite: false, tags: [] }
 
 const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Video }> = [
@@ -1515,6 +1546,7 @@ function App() {
             email: authEmail,
             password: authPassword,
             options: {
+              emailRedirectTo: getAuthRedirectUrl(),
               data: {
                 name: authName.trim() || authEmail.split('@')[0],
               },
@@ -1536,10 +1568,10 @@ function App() {
         setCurrentUser(toAuthUser(authResult.data.session.user))
         setToast(authMode === 'signup' ? 'Account created. Your workspace is ready.' : 'Logged in.')
       } else {
-        setToast('Account created. Check your email to confirm before logging in.')
+        setToast('账号已创建，请打开确认邮件完成验证后再登录。')
       }
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Authentication failed.')
+      setAuthError(authErrorMessage(error))
     } finally {
       setIsAuthBusy(false)
     }
