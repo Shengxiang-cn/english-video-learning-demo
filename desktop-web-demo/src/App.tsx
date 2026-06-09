@@ -3046,43 +3046,26 @@ function App() {
             </div>
           </div>
           <div className="home-discovery-waterfall">
-            {discoveryItems.map((item, index) => {
-              const savedVideo = findSavedDiscoveryVideo(item.id)
-              const savedMeta = savedVideo ? videoMeta[savedVideo.id] : null
-              const statusLabel = savedMeta?.status === 'inbox'
-                ? 'In Inbox'
-                : savedMeta?.status === 'learning'
-                  ? 'Continue learning'
-                  : savedMeta?.status === 'done'
-                    ? 'Done'
-                    : null
-
-              return (
-                <button
-                  key={item.id}
-                  className="home-video-card"
-                  type="button"
-                  onClick={() => setPreviewDiscoverId(item.id)}
-                >
-                  <div className="home-video-card__thumb" data-tone={index % 4}>
-                    <img alt={item.title} src={item.thumbnailUrl} />
+            {discoveryItems.map((item, index) => (
+              <button
+                key={item.id}
+                className="home-video-card"
+                type="button"
+                onClick={() => setPreviewDiscoverId(item.id)}
+              >
+                <div className="home-video-card__thumb" data-tone={index % 4}>
+                  <img alt={item.title} src={item.thumbnailUrl} />
+                  <span>{item.duration}</span>
+                </div>
+                <div className="home-video-card__body">
+                  <strong>{item.title}</strong>
+                  <div>
+                    <span>{item.channel}</span>
                     <span>{item.duration}</span>
                   </div>
-                  <div className="home-video-card__body">
-                    <strong>{item.title}</strong>
-                    <div>
-                      <span>{item.channel}</span>
-                      <span>{item.duration}</span>
-                    </div>
-                    {statusLabel ? (
-                      <small className="discover-status">
-                        {savedMeta?.isFavourite ? '★ ' : null}{statusLabel}
-                      </small>
-                    ) : null}
-                  </div>
-                </button>
-              )
-            })}
+                </div>
+              </button>
+            ))}
           </div>
         </section>
       </div>
@@ -3931,13 +3914,7 @@ function App() {
                         disabled={isImporting}
                         onClick={() => void startLearningFromDiscover(previewDiscoverItem.id)}
                       >
-                        {findSavedDiscoveryVideo(previewDiscoverItem.id)
-                          ? (videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'done'
-                              ? 'Review again'
-                              : videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'learning'
-                                ? 'Continue learning'
-                                : 'Start learning')
-                          : 'Start learning'}
+                        Start learning
                       </button>
                       <button
                         className="secondary-button"

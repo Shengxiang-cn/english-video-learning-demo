@@ -2745,16 +2745,6 @@
   font-size: 0.78rem;
 }
 
-.discover-status {
-  width: fit-content;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: #eef4ff;
-  color: #3f6db2;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
 .preview-modal {
   display: grid;
   grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
