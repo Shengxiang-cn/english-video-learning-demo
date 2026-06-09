@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
@@ -30,6 +31,7 @@ const supabaseAuth = isSupabaseConfigured
 
 const videosTable = 'learning_videos'
 const notesTable = 'learning_notes'
+const conversationsTable = 'learning_conversations'
 const transcriptChunksTable = 'learning_transcript_chunks'
 
 app.use(cors())
@@ -71,6 +73,25 @@ async function requireAuth(req, res, next) {
   return next()
 }
 
+async function optionalAuth(req, _res, next) {
+  if (!supabaseAuth) {
+    return next()
+  }
+
+  const accessToken = getBearerToken(req)
+  if (!accessToken) {
+    return next()
+  }
+
+  const { data, error } = await supabaseAuth.auth.getUser(accessToken)
+  if (!error && data.user) {
+    req.accessToken = accessToken
+    req.user = publicUser(data.user)
+  }
+
+  return next()
+}
+
 function requestSupabase(req) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -86,6 +107,37 @@ function requestSupabase(req) {
       },
     },
   })
+}
+
+function contractVideoFromRow(row) {
+  return {
+    id: row.id,
+    youtubeId: row.youtube_id ?? undefined,
+    youtubeUrl: row.youtube_url,
+    title: row.title,
+    channel: row.channel,
+    durationSec: row.duration_sec ?? 0,
+    thumbnailUrl: row.cover_image ?? undefined,
+    transcript: row.transcript ?? [],
+    status: row.status ?? 'inbox',
+    isFavourite: Boolean(row.is_favourite),
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    lastPositionSec: row.last_position_sec ?? 0,
+    lastWatchedAt: row.last_watched_at ?? null,
+    savedAt: row.saved_at,
+  }
+}
+
+function contractVideoFromPreview(video) {
+  return {
+    id: video.id,
+    youtubeId: video.youtubeId,
+    youtubeUrl: video.youtubeUrl,
+    title: video.title,
+    channel: video.channel,
+    durationSec: video.durationSec,
+    thumbnailUrl: video.thumbnailUrl,
+  }
 }
 
 function videoToRow(video, userId) {
@@ -147,6 +199,7 @@ function rowToVideo(row) {
     status: row.status ?? (row.last_position_sec > 0 ? 'learning' : 'inbox'),
     isFavourite: Boolean(row.is_favourite),
     tags: row.tags ?? [],
+    lastWatchedAt: row.last_watched_at ?? null,
     savedAt: row.saved_at,
   }
 }
@@ -191,6 +244,129 @@ function rowToNote(row) {
     savedAt: row.saved_at,
     isStarred: Boolean(row.is_starred),
     source: row.source,
+  }
+}
+
+function rowToConversation(row) {
+  return {
+    id: row.id,
+    videoId: row.video_id,
+    videoTitle: row.video_title ?? undefined,
+    question: row.question,
+    quote: row.quote ?? '',
+    answer: row.answer,
+    createdAt: row.created_at,
+  }
+}
+
+function stableId(prefix, ...parts) {
+  const hash = crypto
+    .createHash('sha256')
+    .update(parts.map((part) => String(part ?? '')).join('|'))
+    .digest('hex')
+    .slice(0, 24)
+  return `${prefix}-${hash}`
+}
+
+function normalizeContractTranscript(value) {
+  return (Array.isArray(value) ? value : [])
+    .flatMap((segment, index) => {
+      if (!segment || typeof segment !== 'object') return []
+      const text = String(segment.text ?? '').replace(/\s+/g, ' ').trim()
+      if (!text) return []
+      const startSec = Math.max(0, Number(segment.startSec ?? segment.start_sec) || 0)
+      const endSec = Math.max(startSec, Number(segment.endSec ?? segment.end_sec) || startSec)
+      return [{
+        id: String(segment.id ?? `seg-${index + 1}`),
+        startSec,
+        endSec,
+        text,
+      }]
+    })
+}
+
+function normalizeGuestActivity(value) {
+  const activity = value && typeof value === 'object' ? value : {}
+  return {
+    playedSeconds: Math.max(0, Number(activity.playedSeconds) || 0),
+    hasStartedWatching: activity.hasStartedWatching === true,
+    hasAskedAI: activity.hasAskedAI === true,
+    hasTemporaryNotes: activity.hasTemporaryNotes === true,
+    askCount: Math.max(0, Number(activity.askCount) || 0),
+  }
+}
+
+function guestActivityRequiresLearning(activity) {
+  return activity.playedSeconds > 0
+    || activity.hasStartedWatching
+    || activity.hasAskedAI
+    || activity.hasTemporaryNotes
+    || activity.askCount > 0
+}
+
+function normalizeGuestNote(note, index, userId, video) {
+  if (!note || typeof note !== 'object') return null
+
+  const rawType = String(note.type ?? '').trim()
+  const type = ['highlight', 'thought', 'explanation', 'keyIdea', 'reviewQuestion', 'videoBrief'].includes(rawType)
+    ? rawType
+    : 'explanation'
+  const source = type === 'thought'
+    ? 'thought'
+    : ['manual', 'ai', 'highlight', 'thought'].includes(String(note.source ?? '').trim())
+      ? String(note.source).trim()
+      : type === 'highlight'
+        ? 'highlight'
+        : 'ai'
+  const quote = String(note.quote ?? note.originalSubtitle ?? '').replace(/\s+/g, ' ').trim()
+  const content = String(note.content ?? note.note ?? '').trim()
+  if (!quote && !content) return null
+
+  const clientTempId = String(note.clientTempId ?? '').trim()
+  const id = clientTempId
+    ? stableId('guest-note', userId, video.id, clientTempId)
+    : stableId('guest-note', userId, video.id, index, quote, content)
+
+  return {
+    id,
+    videoId: video.id,
+    videoTitle: video.title,
+    quote: quote || content.slice(0, 240),
+    timestamp: String(note.timestampLabel ?? note.timestamp ?? '00:00').trim() || '00:00',
+    note: String(note.note ?? content).trim() || content,
+    content: content || String(note.note ?? '').trim(),
+    takeaway: String(note.takeaway ?? content ?? note.note ?? '').trim() || content || quote,
+    tags: Array.isArray(note.tags) ? note.tags.filter((tag) => typeof tag === 'string') : [],
+    type,
+    originalSubtitle: quote || undefined,
+    topics: [],
+    source,
+    isStarred: false,
+    createdAt: new Date().toISOString(),
+    savedAt: new Date().toISOString(),
+  }
+}
+
+function normalizeGuestConversation(record, index, userId, video) {
+  if (!record || typeof record !== 'object') return null
+  const question = String(record.question ?? '').trim()
+  const answer = String(record.answer ?? '').trim()
+  if (!question || !answer) return null
+
+  const clientTempId = String(record.clientTempId ?? '').trim()
+  const createdAt = String(record.createdAt ?? '').trim() || new Date().toISOString()
+
+  return {
+    id: clientTempId
+      ? stableId('guest-chat', userId, video.id, clientTempId)
+      : stableId('guest-chat', userId, video.id, index, question, answer),
+    user_id: userId,
+    video_id: video.id,
+    video_title: video.title,
+    question,
+    quote: String(record.quote ?? '').trim() || null,
+    answer,
+    created_at: createdAt,
   }
 }
 
@@ -659,6 +835,92 @@ async function fetchTranscript(youtubeId) {
   }))
 }
 
+function youtubeIdFromRequest(body) {
+  const explicitId = String(body?.youtubeId ?? '').trim()
+  if (explicitId) {
+    return parseYoutubeId(explicitId)
+  }
+
+  return parseYoutubeId(String(body?.youtubeUrl ?? body?.url ?? '').trim())
+}
+
+async function parseYouTubeForLearning(body) {
+  const youtubeId = youtubeIdFromRequest(body)
+
+  if (!youtubeId) {
+    throw new Error('Please provide a valid YouTube URL or YouTube video ID.')
+  }
+
+  const canonicalUrl = `https://www.youtube.com/watch?v=${youtubeId}`
+  const [metadata, transcriptResult] = await Promise.all([
+    fetchOembed(canonicalUrl),
+    fetchTranscript(youtubeId),
+  ])
+
+  const transcript = normalizeTranscript(transcriptResult.segments ?? [])
+  const durationSec = Math.max(transcript[transcript.length - 1]?.endSec ?? 0, 300)
+  const thumbnailUrl = `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+
+  return {
+    video: {
+      id: `youtube-${youtubeId}`,
+      youtubeId,
+      youtubeUrl: canonicalUrl,
+      title: metadata.title ?? `YouTube video ${youtubeId}`,
+      channel: metadata.author_name ?? 'YouTube',
+      durationSec,
+      durationLabel: formatDuration(durationSec),
+      thumbnailUrl,
+      coverImage: thumbnailUrl,
+      coverEyebrow: metadata.author_name ?? 'YouTube',
+      coverTitle: metadata.title ?? `YouTube video ${youtubeId}`,
+      coverDetail: 'Imported YouTube video with transcript',
+      accent: '#8cb8ff',
+      sourceType: 'youtube',
+      transcriptLanguage: transcriptResult.language,
+      transcriptSource: transcriptResult.source,
+      transcriptLanguages: transcriptResult.availableLanguages,
+      transcriptError: transcript.length === 0 ? transcriptResult.error ?? null : null,
+    },
+    transcript,
+  }
+}
+
+function contractVideoToStoredVideo(temporaryVideo, transcript, status, savedAt = new Date().toISOString()) {
+  const youtubeId = String(temporaryVideo.youtubeId ?? parseYoutubeId(temporaryVideo.youtubeUrl ?? temporaryVideo.id) ?? '').trim()
+  const videoId = youtubeId ? `youtube-${youtubeId}` : String(temporaryVideo.id ?? `temporary-${Date.now()}`)
+  const durationSec = Math.max(Number(temporaryVideo.durationSec) || 0, transcript[transcript.length - 1]?.endSec ?? 0)
+  const lastPositionSec = Math.max(0, Math.round(Number(temporaryVideo.lastPositionSec ?? 0) || 0))
+
+  return {
+    id: videoId,
+    title: String(temporaryVideo.title ?? `YouTube video ${youtubeId || videoId}`).trim(),
+    channel: String(temporaryVideo.channel ?? 'YouTube').trim(),
+    durationLabel: formatDuration(durationSec),
+    durationSec,
+    lastPositionSec,
+    lastPositionLabel: lastPositionSec > 0 ? `Continue at ${formatDuration(lastPositionSec)}` : 'Not started',
+    summary: 'Imported from Discover preview.',
+    youtubeUrl: String(temporaryVideo.youtubeUrl ?? (youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : '')).trim(),
+    youtubeId: youtubeId || null,
+    accent: '#8cb8ff',
+    coverImage: temporaryVideo.thumbnailUrl ?? null,
+    coverEyebrow: String(temporaryVideo.channel ?? 'YouTube').trim(),
+    coverTitle: String(temporaryVideo.title ?? '').trim(),
+    coverDetail: 'Migrated from guest workspace',
+    sourceType: 'youtube',
+    transcript,
+    transcriptLanguage: null,
+    transcriptSource: null,
+    transcriptLanguages: [],
+    transcriptError: transcript.length === 0 ? { code: 'NO_TRANSCRIPT', message: 'No transcript was provided during migration.' } : null,
+    status,
+    isFavourite: false,
+    tags: [],
+    savedAt,
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -692,50 +954,76 @@ app.get('/api/library', requireAuth, async (req, res) => {
   })
 })
 
+app.post('/api/youtube/preview', async (req, res) => {
+  try {
+    const { video, transcript } = await parseYouTubeForLearning(req.body)
+    res.json({
+      video: contractVideoFromPreview(video),
+      transcript,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to preview this YouTube video.'
+    res.status(400).json({ error: message })
+  }
+})
+
 app.post('/api/youtube/import', requireAuth, async (req, res) => {
   try {
-    const url = String(req.body?.url ?? '').trim()
-    const youtubeId = parseYoutubeId(url)
-
-    if (!youtubeId) {
-      return res.status(400).json({ error: 'Please paste a valid YouTube URL.' })
-    }
-
-    const canonicalUrl = `https://www.youtube.com/watch?v=${youtubeId}`
-    const [metadata, transcriptResult] = await Promise.all([
-      fetchOembed(canonicalUrl),
-      fetchTranscript(youtubeId),
-    ])
-
-    const transcript = normalizeTranscript(transcriptResult.segments ?? [])
-    const durationSec = Math.max(transcript.at(-1)?.endSec ?? 0, 300)
+    const requestedStatus = req.body?.status === 'learning' ? 'learning' : 'inbox'
+    const forceReopen = req.body?.forceReopen === true
+    const { video, transcript } = await parseYouTubeForLearning(req.body)
 
     const importedVideo = {
-      id: `youtube-${youtubeId}`,
-      title: metadata.title ?? `YouTube video ${youtubeId}`,
-      channel: metadata.author_name ?? 'YouTube',
-      durationLabel: formatDuration(durationSec),
-      durationSec,
-      lastPositionSec: transcript[0]?.startSec ?? 0,
+      ...video,
+      lastPositionSec: 0,
       lastPositionLabel: 'Not started',
       summary: 'Imported from YouTube. Ask AI to summarize this video or explain highlighted transcript passages.',
-      youtubeUrl: canonicalUrl,
-      youtubeId,
-      accent: '#8cb8ff',
-      coverImage: `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`,
-      coverEyebrow: metadata.author_name ?? 'YouTube',
-      coverTitle: metadata.title ?? `YouTube video ${youtubeId}`,
-      coverDetail: 'Imported YouTube video with transcript',
-      sourceType: 'youtube',
       savedAt: new Date().toISOString(),
-      transcriptLanguage: transcriptResult.language,
-      transcriptSource: transcriptResult.source,
-      transcriptLanguages: transcriptResult.availableLanguages,
-      transcriptError: transcript.length === 0 ? transcriptResult.error ?? null : null,
+      status: requestedStatus,
       transcript,
     }
 
     const db = requestSupabase(req)
+    const { data: existingVideo, error: existingError } = await db
+      .from(videosTable)
+      .select('*')
+      .eq('id', importedVideo.id)
+      .maybeSingle()
+
+    if (existingError) {
+      return res.status(500).json({ error: existingError.message })
+    }
+
+    if (existingVideo) {
+      const existingStatus = existingVideo.status ?? 'inbox'
+      const nextStatus = existingStatus === 'done' && !forceReopen
+        ? 'done'
+        : requestedStatus === 'learning'
+          ? 'learning'
+          : existingStatus
+      const { data: updatedVideo, error: updateError } = await db
+        .from(videosTable)
+        .update({
+          status: nextStatus,
+          transcript: importedVideo.transcript,
+          transcript_language: importedVideo.transcriptLanguage,
+          transcript_source: importedVideo.transcriptSource,
+          transcript_languages: importedVideo.transcriptLanguages,
+          transcript_error: importedVideo.transcriptError,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', importedVideo.id)
+        .select('*')
+        .single()
+
+      if (updateError) {
+        return res.status(500).json({ error: updateError.message })
+      }
+
+      await replaceTranscriptChunks(db, req.user.id, updatedVideo.id, updatedVideo.transcript ?? [])
+      return res.json({ video: contractVideoFromRow(updatedVideo) })
+    }
+
     const { data, error } = await db
       .from(videosTable)
       .upsert(videoToRow(importedVideo, req.user.id), { onConflict: 'user_id,id' })
@@ -748,7 +1036,7 @@ app.post('/api/youtube/import', requireAuth, async (req, res) => {
 
     await replaceTranscriptChunks(db, req.user.id, data.id, data.transcript ?? [])
 
-    res.json(rowToVideo(data))
+    res.json({ video: contractVideoFromRow(data) })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to import this YouTube video.'
     res.status(500).json({ error: message })
@@ -815,7 +1103,90 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   }
 })
 
-app.post('/api/ask', requireAuth, async (req, res) => {
+app.post('/api/guest/migrate', requireAuth, async (req, res) => {
+  try {
+    const temporaryVideo = req.body?.temporaryVideo
+    if (!temporaryVideo || typeof temporaryVideo !== 'object') {
+      return res.status(400).json({ error: 'Missing temporaryVideo.' })
+    }
+
+    const transcript = normalizeContractTranscript(req.body?.transcript)
+    const activity = normalizeGuestActivity(req.body?.activity)
+    const status = guestActivityRequiresLearning(activity) ? 'learning' : 'inbox'
+    const storedVideo = contractVideoToStoredVideo(temporaryVideo, transcript, status)
+    const db = requestSupabase(req)
+
+    const { data: existingVideo, error: existingError } = await db
+      .from(videosTable)
+      .select('*')
+      .eq('id', storedVideo.id)
+      .maybeSingle()
+
+    if (existingError) {
+      return res.status(500).json({ error: existingError.message })
+    }
+
+    const videoRow = {
+      ...videoToRow(storedVideo, req.user.id),
+      status: existingVideo?.status === 'done' ? 'done' : status,
+      transcript,
+      last_position_sec: activity.playedSeconds > 0 ? Math.round(activity.playedSeconds) : existingVideo?.last_position_sec ?? 0,
+      last_position_label: activity.playedSeconds > 0 ? `Continue at ${formatDuration(activity.playedSeconds)}` : existingVideo?.last_position_label ?? 'Not started',
+      last_watched_at: activity.playedSeconds > 0 || activity.hasStartedWatching ? new Date().toISOString() : existingVideo?.last_watched_at ?? null,
+      saved_at: existingVideo?.saved_at ?? new Date().toISOString(),
+    }
+
+    const { data: savedVideo, error: videoError } = await db
+      .from(videosTable)
+      .upsert(videoRow, { onConflict: 'user_id,id' })
+      .select('*')
+      .single()
+
+    if (videoError) {
+      return res.status(500).json({ error: videoError.message })
+    }
+
+    await replaceTranscriptChunks(db, req.user.id, savedVideo.id, transcript)
+
+    const normalizedVideo = rowToVideo(savedVideo)
+    const noteRows = (Array.isArray(req.body?.temporaryNotes) ? req.body.temporaryNotes : [])
+      .map((note, index) => normalizeGuestNote(note, index, req.user.id, normalizedVideo))
+      .filter(Boolean)
+      .map((note) => noteToRow(note, req.user.id))
+    const conversationRows = (Array.isArray(req.body?.temporaryChatRecords) ? req.body.temporaryChatRecords : [])
+      .map((record, index) => normalizeGuestConversation(record, index, req.user.id, normalizedVideo))
+      .filter(Boolean)
+
+    const [notesResult, conversationsResult] = await Promise.all([
+      noteRows.length
+        ? db.from(notesTable).upsert(noteRows, { onConflict: 'user_id,id' }).select('*')
+        : Promise.resolve({ data: [], error: null }),
+      conversationRows.length
+        ? db.from(conversationsTable).upsert(conversationRows, { onConflict: 'user_id,id' }).select('*')
+        : Promise.resolve({ data: [], error: null }),
+    ])
+
+    const writeError = notesResult.error ?? conversationsResult.error
+    if (writeError) {
+      return res.status(500).json({ error: writeError.message })
+    }
+
+    res.json({
+      video: {
+        id: savedVideo.id,
+        youtubeId: savedVideo.youtube_id,
+        status: savedVideo.status,
+      },
+      notes: (notesResult.data ?? []).map(rowToNote),
+      conversations: (conversationsResult.data ?? []).map(rowToConversation),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to migrate guest workspace.'
+    res.status(500).json({ error: message })
+  }
+})
+
+app.post('/api/ask', optionalAuth, async (req, res) => {
   try {
     const apiKey = process.env.KIMI_API_KEY
     if (!apiKey) {
@@ -823,17 +1194,17 @@ app.post('/api/ask', requireAuth, async (req, res) => {
     }
 
     const videoId = String(req.body?.videoId ?? req.body?.video_id ?? '').trim()
-    const question = String(req.body?.question ?? '').trim()
+    const videoTitle = String(req.body?.videoTitle ?? '').trim()
     const selectedSubtitle = normalizeSelectedSubtitle(req.body?.selectedSubtitle ?? req.body?.selected_subtitle)
     const currentPlaybackTime = Math.max(0, Math.round(Number(req.body?.currentPlaybackTime ?? req.body?.current_playback_time) || 0))
     const answerLanguage = String(req.body?.answerLanguage ?? req.body?.answer_language ?? 'zh-CN').trim() || 'zh-CN'
+    const mode = req.body?.mode === 'authenticated' ? 'authenticated' : 'guest'
     const purpose = String(req.body?.purpose ?? 'ask').trim()
+    const question = String(req.body?.userQuestion ?? (purpose === 'translate' ? req.body?.question : '')).trim()
 
     if (!videoId || !question) {
-      return res.status(400).json({ error: 'Missing videoId or question.' })
+      return res.status(400).json({ error: 'Missing videoId or userQuestion.' })
     }
-
-    const db = requestSupabase(req)
 
     if (purpose === 'translate') {
       if (!selectedSubtitle?.text) {
@@ -883,25 +1254,60 @@ app.post('/api/ask', requireAuth, async (req, res) => {
       })
     }
 
-    const { data: videoRow, error: videoError } = await db
-      .from(videosTable)
-      .select('id,title,channel,transcript,duration_sec,tags')
-      .eq('user_id', req.user.id)
-      .eq('id', videoId)
-      .maybeSingle()
-
-    if (videoError) {
-      return res.status(500).json({ error: videoError.message })
+    if (mode === 'authenticated' && !req.user) {
+      return res.status(401).json({ error: 'Please log in first.' })
     }
 
-    if (!videoRow) {
-      return res.status(404).json({ error: 'Video not found.' })
+    let video = {
+      id: videoId,
+      title: videoTitle || 'Temporary video',
+      channel: 'YouTube',
+      transcript: normalizeContractTranscript(req.body?.nearbySubtitles),
     }
 
-    const video = rowToVideo(videoRow)
+    if (selectedSubtitle) {
+      const hasSelected = video.transcript.some(
+        (segment) => Math.abs(Number(segment.startSec) - selectedSubtitle.startSec) < 0.5 && segment.text === selectedSubtitle.text,
+      )
+      if (!hasSelected) {
+        video.transcript = [
+          {
+            id: 'selected-subtitle',
+            startSec: selectedSubtitle.startSec,
+            endSec: selectedSubtitle.endSec,
+            text: selectedSubtitle.text,
+          },
+          ...video.transcript,
+        ]
+      }
+    }
+
+    let db = null
+    let videoRow = null
+    if (mode === 'authenticated') {
+      db = requestSupabase(req)
+      const result = await db
+        .from(videosTable)
+        .select('id,title,channel,transcript,duration_sec,tags')
+        .eq('user_id', req.user.id)
+        .eq('id', videoId)
+        .maybeSingle()
+
+      if (result.error) {
+        return res.status(500).json({ error: result.error.message })
+      }
+
+      if (!result.data) {
+        return res.status(404).json({ error: 'Video not found.' })
+      }
+
+      videoRow = result.data
+      video = rowToVideo(videoRow)
+    }
+
     const transcript = Array.isArray(video.transcript) ? video.transcript : []
     if (transcript.length === 0) {
-      return res.status(400).json({ error: 'This video does not have a transcript source.' })
+      return res.status(400).json({ error: 'No subtitle context was provided for this question.' })
     }
 
     const transcriptSource = buildTranscriptContext({ transcript, strategy: 'full' })
@@ -976,14 +1382,33 @@ app.post('/api/ask', requireAuth, async (req, res) => {
     const rawAnswer = data?.choices?.[0]?.message?.content ?? 'No answer returned.'
     const structuredAnswer = parseStructuredAiResponse(rawAnswer)
     const answer = structuredAnswer.answer
-    const citations = citationsFromTimestamps(structuredAnswer.timestamps, answer, video)
-      .concat(normalizeCitations(structuredAnswer.citations, video))
-      .filter((citation, index, array) => array.findIndex((item) => item.segmentId === citation.segmentId) === index)
-      .slice(0, 5)
-    const followUps = normalizeFollowUps(structuredAnswer.followUps)
-    const saveCandidates = normalizeSaveCandidates(structuredAnswer.saveCandidates)
+    let conversation = null
 
-    res.json({ answer, citations, followUps, saveCandidates })
+    if (mode === 'authenticated' && db && req.user) {
+      const conversationRow = {
+        id: stableId('chat', req.user.id, video.id, question, answer, Date.now()),
+        user_id: req.user.id,
+        video_id: video.id,
+        video_title: video.title,
+        question,
+        quote: selectedSubtitle?.text ?? null,
+        answer,
+        created_at: new Date().toISOString(),
+      }
+      const { data: savedConversation, error: conversationError } = await db
+        .from(conversationsTable)
+        .insert(conversationRow)
+        .select('*')
+        .single()
+
+      if (conversationError) {
+        return res.status(500).json({ error: conversationError.message })
+      }
+
+      conversation = rowToConversation(savedConversation)
+    }
+
+    res.json({ answer, conversation })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to ask AI.'
     res.status(500).json({ error: message })
