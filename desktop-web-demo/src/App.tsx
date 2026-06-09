@@ -324,132 +324,49 @@ const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Vi
 
 const discoveryItems = [
   {
-    id: 'editor-ai-agent',
-    youtubeId: 'RzkD_rTEBYs',
-    youtubeUrl: 'https://www.youtube.com/watch?v=RzkD_rTEBYs',
-    title: 'How will AI change the world?',
-    channel: 'TED-Ed',
-    duration: '29:45',
-    durationSec: 1785,
+    id: 'karpathy-llm-deep-dive',
+    youtubeId: '7xTGNNLPyMI',
+    youtubeUrl: 'https://www.youtube.com/watch?v=7xTGNNLPyMI',
+    title: 'Deep Dive into LLMs like ChatGPT',
+    channel: 'Andrej Karpathy',
+    duration: '3:31:25',
+    durationSec: 12685,
+    thumbnailUrl: 'https://img.youtube.com/vi/7xTGNNLPyMI/maxresdefault.jpg',
     difficulty: 'Advanced',
-    category: 'AI Agent',
-    tags: ['AI Agent', 'Evaluation'],
-    reason: '运营精选：适合练习提取 AI 影响、技术边界和长期判断。',
-    learnBullets: ['识别 AI 影响的关键论点', '保存技术边界相关片段', '把观点转成可复习笔记'],
-    views: '18.4K',
-    likes: '1.2K',
-  },
-  {
-    id: 'product-decision',
-    youtubeId: '3Y8aq_ofEVs',
-    youtubeUrl: 'https://www.youtube.com/watch?v=3Y8aq_ofEVs',
-    title: "Robotics' End Game: Nvidia's Jim Fan",
-    channel: 'Sequoia Capital',
-    duration: '42:18',
-    durationSec: 2538,
-    difficulty: 'Intermediate',
-    category: '产品',
-    tags: ['Product', 'Startup'],
-    reason: '运营精选：适合做 AI 产品判断、平台机会和长期趋势相关字幕笔记。',
-    learnBullets: ['拆解 AI 产品机会', '提炼平台趋势表达', '保存技术判断中的关键观点'],
-    views: '42.8K',
-    likes: '3.1K',
-  },
-  {
-    id: 'english-gold',
-    youtubeId: '5MgBikgcWnY',
-    youtubeUrl: 'https://www.youtube.com/watch?v=5MgBikgcWnY',
-    title: 'The first 20 hours -- how to learn anything',
-    channel: 'TEDx Talks',
-    duration: '18:22',
-    durationSec: 1102,
-    difficulty: 'Beginner',
-    category: '英语',
-    tags: ['English', 'Research'],
-    reason: '运营精选：适合把学习方法相关表达保存为可复习英文笔记。',
-    learnBullets: ['积累学习主题表达', '把高频句式保存成 Highlight', '用 AI 解释语境和用法'],
-    views: '96.2K',
-    likes: '8.7K',
-  },
-  {
-    id: 'design-systems',
-    youtubeId: 'iG9CE55wbtY',
-    youtubeUrl: 'https://www.youtube.com/watch?v=iG9CE55wbtY',
-    title: 'Do schools kill creativity?',
-    channel: 'TED',
-    duration: '36:04',
-    durationSec: 2164,
-    difficulty: 'Intermediate',
-    category: '设计',
-    tags: ['Design', 'Product'],
-    reason: '运营精选：适合保存关于创造力、教育和表达方式的经典片段。',
-    learnBullets: ['理解创造力相关观点', '提炼演讲结构和表达', '保存可复用的英文论述'],
-    views: '27.6K',
-    likes: '2.4K',
-  },
-  {
-    id: 'startup-pricing',
-    youtubeId: 'UF8uR6Z6KLc',
-    youtubeUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
-    title: "Steve Jobs' 2005 Stanford Commencement Address",
-    channel: 'Stanford',
-    duration: '51:12',
-    durationSec: 3072,
-    difficulty: 'Advanced',
-    category: '创业',
-    tags: ['Startup', 'Business'],
-    reason: '运营精选：适合练习从经典演讲里提取人生选择和创业判断。',
-    learnBullets: ['识别演讲中的核心主题', '保存高价值金句', '复盘选择和判断背后的逻辑'],
-    views: '13.9K',
-    likes: '986',
-  },
-  {
-    id: 'cognitive-learning',
-    youtubeId: '8KkKuTCFvzI',
-    youtubeUrl: 'https://www.youtube.com/watch?v=8KkKuTCFvzI',
-    title: 'What Makes a Good Life?',
-    channel: 'TED',
-    duration: '24:33',
-    durationSec: 1473,
-    difficulty: 'Beginner',
-    category: '认知科学',
-    tags: ['Research', 'English'],
-    reason: '运营精选：适合建立英文听力、研究结论和长期复习之间的连接。',
-    learnBullets: ['理解长期研究结论', '把字幕转成复习问题', '保存可长期复习的学习卡片'],
-    views: '71.5K',
-    likes: '5.6K',
-  },
-  {
-    id: 'tech-architecture',
-    youtubeId: 'qp0HIF3SfI4',
-    youtubeUrl: 'https://www.youtube.com/watch?v=qp0HIF3SfI4',
-    title: 'How Great Leaders Inspire Action',
-    channel: 'TED',
-    duration: '44:20',
-    durationSec: 2660,
-    difficulty: 'Advanced',
-    category: '技术',
+    category: 'LLM',
     tags: ['AI Agent', 'Research'],
-    reason: '运营精选：适合沉淀 why/how/what 结构和演讲表达。',
-    learnBullets: ['理解演讲结构', '保存领导力相关片段', '提炼可复用表达'],
-    views: '33.1K',
-    likes: '2.9K',
+    reason: '运营精选：适合系统理解 LLM、ChatGPT 和现代 AI 工具的底层工作方式。',
+    learnBullets: ['建立 LLM 基础概念', '保存 prompt 和训练相关表达', '把长课拆成可复习笔记'],
   },
   {
-    id: 'business-story',
-    youtubeId: 'arj7oStGLkU',
-    youtubeUrl: 'https://www.youtube.com/watch?v=arj7oStGLkU',
-    title: 'Inside the Mind of a Master Procrastinator',
-    channel: 'TED',
-    duration: '31:48',
-    durationSec: 1908,
+    id: 'karpathy-how-i-use-llms',
+    youtubeId: 'EWvNQjAaOHw',
+    youtubeUrl: 'https://www.youtube.com/watch?v=EWvNQjAaOHw&t=4150s',
+    title: 'How I use LLMs',
+    channel: 'Andrej Karpathy',
+    duration: '2:11:14',
+    durationSec: 7874,
+    thumbnailUrl: 'https://img.youtube.com/vi/EWvNQjAaOHw/maxresdefault.jpg',
     difficulty: 'Intermediate',
-    category: '商业',
-    tags: ['Business', 'Startup'],
-    reason: '运营精选：适合保存叙事节奏、幽默表达和关键隐喻。',
-    learnBullets: ['学习演讲叙事结构', '提炼高记忆度表达', '保存故事中的关键片段'],
-    views: '58.0K',
-    likes: '4.2K',
+    category: 'AI Workflow',
+    tags: ['AI Agent', 'Product'],
+    reason: '运营精选：适合学习真实工作流里如何使用 LLM，并积累 AI 工具表达。',
+    learnBullets: ['理解 LLM 工作流', '保存工具使用相关片段', '整理可复用的学习方法'],
+  },
+  {
+    id: 'jenny-wen-design-process',
+    youtubeId: 'eh8bcBIAAFo',
+    youtubeUrl: 'https://www.youtube.com/watch?v=eh8bcBIAAFo&t=390s',
+    title: 'The design process is dead. Here’s what’s replacing it.',
+    channel: "Lenny's Podcast",
+    duration: '1:17:26',
+    durationSec: 4646,
+    thumbnailUrl: 'https://img.youtube.com/vi/eh8bcBIAAFo/maxresdefault.jpg',
+    difficulty: 'Intermediate',
+    category: 'Design',
+    tags: ['Design', 'Product'],
+    reason: '运营精选：适合理解 AI 产品团队的新设计流程，以及设计如何进入真实迭代。',
+    learnBullets: ['理解 AI 产品设计变化', '保存设计流程相关表达', '沉淀产品协作和决策笔记'],
   },
 ]
 
@@ -3145,13 +3062,14 @@ function App() {
                   onClick={() => setPreviewDiscoverId(item.id)}
                 >
                   <div className="home-video-card__thumb" data-tone={index % 4}>
+                    <img alt={item.title} src={item.thumbnailUrl} />
                     <span>{item.duration}</span>
                   </div>
                   <div className="home-video-card__body">
                     <strong>{item.title}</strong>
                     <div>
-                      <span>{item.views} views</span>
-                      <span>{item.likes} likes</span>
+                      <span>{item.channel}</span>
+                      <span>{item.duration}</span>
                     </div>
                     {statusLabel ? (
                       <small className="discover-status">
@@ -3976,6 +3894,7 @@ function App() {
           <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="preview-modal" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }}>
               <div className="preview-modal__thumb" data-tone={discoveryItems.findIndex((item) => item.id === previewDiscoverItem.id) % 4}>
+                <img alt={previewDiscoverItem.title} src={previewDiscoverItem.thumbnailUrl} />
                 <span>{previewDiscoverItem.duration}</span>
               </div>
               <div className="preview-modal__body">
