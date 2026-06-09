@@ -12,6 +12,7 @@ import {
   FileText,
   Home as HomeIcon,
   Loader2,
+  Lock,
   LogOut,
   MessageCircle,
   MoreHorizontal,
@@ -45,6 +46,87 @@ type VideoMeta = {
   status: InboxTab
   isFavourite: boolean
   tags: string[]
+}
+
+type PendingAction =
+  | { type: 'open-library' }
+  | { type: 'open-notes' }
+  | { type: 'save-discover-to-inbox'; discoverId: string }
+  | { type: 'save-highlight' }
+  | { type: 'add-thought' }
+  | { type: 'save-ai-note'; recordId: string; noteType: AiNoteType }
+  | { type: 'star-note'; noteId: string }
+  | { type: 'edit-tags'; videoId: string }
+  | { type: 'save-video' }
+
+type ContractVideo = {
+  id: string
+  youtubeId: string
+  youtubeUrl: string
+  title: string
+  channel: string
+  durationSec: number
+  thumbnailUrl: string
+  transcript?: DemoVideo['transcript']
+  status?: InboxTab
+  isFavourite?: boolean
+  tags?: string[]
+  lastPositionSec?: number
+  lastWatchedAt?: string | null
+  savedAt?: string
+}
+
+type PreviewResponse = {
+  video: ContractVideo
+  transcript: DemoVideo['transcript']
+}
+
+type ImportResponse = {
+  video: ContractVideo
+}
+
+type GuestMigrateResponse = {
+  video: {
+    id: string
+    youtubeId: string
+    status: InboxTab
+  }
+  notes: unknown[]
+  conversations: unknown[]
+}
+
+type TemporaryChatRecord = {
+  clientTempId: string
+  question: string
+  quote: string
+  answer: string
+  createdAt: string
+}
+
+type TemporaryNote = {
+  clientTempId: string
+  type: AiNoteType
+  source: 'ai' | 'thought' | 'highlight' | 'manual'
+  quote: string
+  timestampLabel: string
+  note: string
+  content: string
+  takeaway: string
+  tags: string[]
+}
+
+type GuestWorkspace = {
+  temporaryVideo: ContractVideo
+  transcript: DemoVideo['transcript']
+  temporaryChatRecords: TemporaryChatRecord[]
+  temporaryNotes: TemporaryNote[]
+  askCount: number
+  playedSeconds: number
+  hasStartedWatching: boolean
+  hasAskedAI: boolean
+  hasTemporaryNotes: boolean
+  createdAt: string
+  pendingAction: string | null
 }
 
 type AuthUser = {
@@ -243,97 +325,129 @@ const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Vi
 const discoveryItems = [
   {
     id: 'editor-ai-agent',
-    title: 'AI Agent 实战指南',
-    channel: 'AI Ascent',
+    youtubeId: 'RzkD_rTEBYs',
+    youtubeUrl: 'https://www.youtube.com/watch?v=RzkD_rTEBYs',
+    title: 'How will AI change the world?',
+    channel: 'TED-Ed',
     duration: '29:45',
+    durationSec: 1785,
     difficulty: 'Advanced',
     category: 'AI Agent',
     tags: ['AI Agent', 'Evaluation'],
-    reason: '运营精选：适合练习从长视频里提取 agent loop、tool use 和 evals 的关键观点。',
+    reason: '运营精选：适合练习提取 AI 影响、技术边界和长期判断。',
+    learnBullets: ['识别 AI 影响的关键论点', '保存技术边界相关片段', '把观点转成可复习笔记'],
     views: '18.4K',
     likes: '1.2K',
   },
   {
     id: 'product-decision',
-    title: '产品经理的决策模型',
-    channel: 'Product Studio',
+    youtubeId: '3Y8aq_ofEVs',
+    youtubeUrl: 'https://www.youtube.com/watch?v=3Y8aq_ofEVs',
+    title: "Robotics' End Game: Nvidia's Jim Fan",
+    channel: 'Sequoia Capital',
     duration: '42:18',
+    durationSec: 2538,
     difficulty: 'Intermediate',
     category: '产品',
     tags: ['Product', 'Startup'],
-    reason: '运营精选：适合做 tradeoff、feedback、roadmap 相关的字幕笔记。',
+    reason: '运营精选：适合做 AI 产品判断、平台机会和长期趋势相关字幕笔记。',
+    learnBullets: ['拆解 AI 产品机会', '提炼平台趋势表达', '保存技术判断中的关键观点'],
     views: '42.8K',
     likes: '3.1K',
   },
   {
     id: 'english-gold',
-    title: '英语表达：访谈金句',
-    channel: 'English Lab',
+    youtubeId: '5MgBikgcWnY',
+    youtubeUrl: 'https://www.youtube.com/watch?v=5MgBikgcWnY',
+    title: 'The first 20 hours -- how to learn anything',
+    channel: 'TEDx Talks',
     duration: '18:22',
+    durationSec: 1102,
     difficulty: 'Beginner',
     category: '英语',
     tags: ['English', 'Research'],
-    reason: '运营精选：适合把访谈中的表达保存为可复习的英文学习笔记。',
+    reason: '运营精选：适合把学习方法相关表达保存为可复习英文笔记。',
+    learnBullets: ['积累学习主题表达', '把高频句式保存成 Highlight', '用 AI 解释语境和用法'],
     views: '96.2K',
     likes: '8.7K',
   },
   {
     id: 'design-systems',
-    title: '设计系统如何支撑高速产品团队',
-    channel: 'Design Field',
+    youtubeId: 'iG9CE55wbtY',
+    youtubeUrl: 'https://www.youtube.com/watch?v=iG9CE55wbtY',
+    title: 'Do schools kill creativity?',
+    channel: 'TED',
     duration: '36:04',
+    durationSec: 2164,
     difficulty: 'Intermediate',
     category: '设计',
     tags: ['Design', 'Product'],
-    reason: '运营精选：适合保存 design system 和产品节奏相关片段。',
+    reason: '运营精选：适合保存关于创造力、教育和表达方式的经典片段。',
+    learnBullets: ['理解创造力相关观点', '提炼演讲结构和表达', '保存可复用的英文论述'],
     views: '27.6K',
     likes: '2.4K',
   },
   {
     id: 'startup-pricing',
-    title: '创业公司早期定价的真实取舍',
-    channel: 'Founder Notes',
+    youtubeId: 'UF8uR6Z6KLc',
+    youtubeUrl: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc',
+    title: "Steve Jobs' 2005 Stanford Commencement Address",
+    channel: 'Stanford',
     duration: '51:12',
+    durationSec: 3072,
     difficulty: 'Advanced',
     category: '创业',
     tags: ['Startup', 'Business'],
-    reason: '运营精选：适合练习从访谈里提取商业判断。',
+    reason: '运营精选：适合练习从经典演讲里提取人生选择和创业判断。',
+    learnBullets: ['识别演讲中的核心主题', '保存高价值金句', '复盘选择和判断背后的逻辑'],
     views: '13.9K',
     likes: '986',
   },
   {
     id: 'cognitive-learning',
-    title: '为什么主动回忆比重复观看更有效',
-    channel: 'Mind Lab',
+    youtubeId: '8KkKuTCFvzI',
+    youtubeUrl: 'https://www.youtube.com/watch?v=8KkKuTCFvzI',
+    title: 'What Makes a Good Life?',
+    channel: 'TED',
     duration: '24:33',
+    durationSec: 1473,
     difficulty: 'Beginner',
     category: '认知科学',
     tags: ['Research', 'English'],
-    reason: '运营精选：适合建立视频学习和复习之间的连接。',
+    reason: '运营精选：适合建立英文听力、研究结论和长期复习之间的连接。',
+    learnBullets: ['理解长期研究结论', '把字幕转成复习问题', '保存可长期复习的学习卡片'],
     views: '71.5K',
     likes: '5.6K',
   },
   {
     id: 'tech-architecture',
-    title: 'AI 产品里的上下文工程与系统边界',
-    channel: 'Tech Deep Dive',
+    youtubeId: 'qp0HIF3SfI4',
+    youtubeUrl: 'https://www.youtube.com/watch?v=qp0HIF3SfI4',
+    title: 'How Great Leaders Inspire Action',
+    channel: 'TED',
     duration: '44:20',
+    durationSec: 2660,
     difficulty: 'Advanced',
     category: '技术',
     tags: ['AI Agent', 'Research'],
-    reason: '运营精选：适合沉淀 context engineering 的核心表达。',
+    reason: '运营精选：适合沉淀 why/how/what 结构和演讲表达。',
+    learnBullets: ['理解演讲结构', '保存领导力相关片段', '提炼可复用表达'],
     views: '33.1K',
     likes: '2.9K',
   },
   {
     id: 'business-story',
-    title: '好的商业故事为什么比功能列表更有用',
-    channel: 'Business Craft',
+    youtubeId: 'arj7oStGLkU',
+    youtubeUrl: 'https://www.youtube.com/watch?v=arj7oStGLkU',
+    title: 'Inside the Mind of a Master Procrastinator',
+    channel: 'TED',
     duration: '31:48',
+    durationSec: 1908,
     difficulty: 'Intermediate',
     category: '商业',
     tags: ['Business', 'Startup'],
-    reason: '运营精选：适合保存 pitch、叙事、用户价值相关字幕。',
+    reason: '运营精选：适合保存叙事节奏、幽默表达和关键隐喻。',
+    learnBullets: ['学习演讲叙事结构', '提炼高记忆度表达', '保存故事中的关键片段'],
     views: '58.0K',
     likes: '4.2K',
   },
@@ -759,6 +873,79 @@ function translationSegmentsForVideo(
   }, {})
 }
 
+function extractYouTubeId(youtubeUrl: string) {
+  try {
+    const url = new URL(youtubeUrl)
+    return url.searchParams.get('v') || url.pathname.split('/').filter(Boolean).pop() || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function durationLabelFromSeconds(seconds: number) {
+  const hours = Math.floor(seconds / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  const secs = Math.floor(seconds % 60)
+
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+function contractVideoToDemoVideo(video: ContractVideo, transcript: DemoVideo['transcript'] = video.transcript ?? []): DemoVideo {
+  return {
+    id: video.id,
+    title: video.title,
+    channel: video.channel,
+    durationLabel: durationLabelFromSeconds(video.durationSec),
+    durationSec: video.durationSec,
+    lastPositionSec: video.lastPositionSec ?? 0,
+    lastPositionLabel: video.lastPositionSec ? `Continue at ${formatTime(video.lastPositionSec)}` : 'Not started',
+    summary: `Temporary learning video from ${video.channel}.`,
+    youtubeUrl: video.youtubeUrl,
+    youtubeId: video.youtubeId,
+    sourceType: 'youtube',
+    accent: '#93c8a1',
+    coverImage: video.thumbnailUrl,
+    playerImage: video.thumbnailUrl,
+    coverEyebrow: video.channel,
+    coverTitle: video.title,
+    coverDetail: 'YouTube preview',
+    status: video.status ?? 'inbox',
+    isFavourite: Boolean(video.isFavourite),
+    tags: video.tags ?? [],
+    savedAt: video.savedAt,
+    transcript,
+  }
+}
+
+function loadStoredGuestWorkspace(): GuestWorkspace | null {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const raw = window.localStorage.getItem('vist.guestWorkspace')
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<GuestWorkspace>
+    if (!parsed.temporaryVideo || !Array.isArray(parsed.transcript)) return null
+
+    return {
+      temporaryVideo: parsed.temporaryVideo as ContractVideo,
+      transcript: parsed.transcript,
+      temporaryChatRecords: Array.isArray(parsed.temporaryChatRecords) ? parsed.temporaryChatRecords as TemporaryChatRecord[] : [],
+      temporaryNotes: Array.isArray(parsed.temporaryNotes) ? parsed.temporaryNotes as TemporaryNote[] : [],
+      askCount: Number(parsed.askCount ?? 0),
+      playedSeconds: Number(parsed.playedSeconds ?? 0),
+      hasStartedWatching: Boolean(parsed.hasStartedWatching),
+      hasAskedAI: Boolean(parsed.hasAskedAI),
+      hasTemporaryNotes: Boolean(parsed.hasTemporaryNotes),
+      createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+      pendingAction: typeof parsed.pendingAction === 'string' ? parsed.pendingAction : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 function selectedSubtitlePayload(selection: TranscriptSelection | null): SelectedSubtitlePayload | null {
   if (!selection?.quote.trim()) {
     return null
@@ -780,16 +967,21 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [isAuthBusy, setIsAuthBusy] = useState(false)
+  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [authModalMessage, setAuthModalMessage] = useState('登录后保存你的学习进度、笔记和 AI 对话。')
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [pendingMigratedVideoId, setPendingMigratedVideoId] = useState<string | null>(null)
   const [screen, setScreen] = useState<Screen>('home')
   const [rightTab, setRightTab] = useState<RightTab>('info')
   const [inboxTab, setInboxTab] = useState<LibraryTab>('inbox')
   const [videos, setVideos] = useState<DemoVideo[]>(catalogVideos)
   const [videoMeta, setVideoMeta] = useState<Record<string, VideoMeta>>(() => initialVideoMeta(catalogVideos))
-  const [libraryIds, setLibraryIds] = useState(initialLibraryIds)
+  const [libraryIds, setLibraryIds] = useState<string[]>([])
   const [selectedVideoId, setSelectedVideoId] = useState(initialLibraryIds[0])
   const [currentPosition, setCurrentPosition] = useState(videoById(initialLibraryIds[0]).lastPositionSec)
   const [isPlaying, setIsPlaying] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [previewDiscoverId, setPreviewDiscoverId] = useState<string | null>(null)
   const [showNoteModal, setShowNoteModal] = useState(false)
   const [showTagModal, setShowTagModal] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
@@ -831,6 +1023,7 @@ function App() {
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
   const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
   const [isChatContextOpen, setIsChatContextOpen] = useState(false)
+  const [guestWorkspace, setGuestWorkspace] = useState<GuestWorkspace | null>(() => loadStoredGuestWorkspace())
 
   const transcriptContentRef = useRef<HTMLDivElement | null>(null)
   const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -847,8 +1040,10 @@ function App() {
   const isManualTranscriptBrowsingRef = useRef(false)
   const detachedAtSegmentIndexRef = useRef<number | null>(null)
 
+  const previewDiscoverItem = discoveryItems.find((item) => item.id === previewDiscoverId) ?? null
   const selectedVideo = findVideoById(videos, selectedVideoId)
   const selectedVideoMeta = videoMeta[selectedVideo.id] ?? defaultVideoMeta
+  const isTemporaryReader = !currentUser && Boolean(guestWorkspace?.temporaryVideo.id === selectedVideo.id)
   const transcript = selectedVideo.transcript
   const selectedQuote = transcriptSelection?.quote ?? ''
   const selectedTimestamp = transcriptSelection?.timestamp ?? formatTime(selectedVideo.lastPositionSec)
@@ -883,6 +1078,55 @@ function App() {
     !isAsking &&
     !hasChatActivity
 
+  useEffect(() => {
+    if (!guestWorkspace) {
+      window.localStorage.removeItem('vist.guestWorkspace')
+      return
+    }
+
+    window.localStorage.setItem('vist.guestWorkspace', JSON.stringify(guestWorkspace))
+  }, [guestWorkspace])
+
+  useEffect(() => {
+    if (!guestWorkspace) return
+
+    const temporaryVideo = contractVideoToDemoVideo(guestWorkspace.temporaryVideo, guestWorkspace.transcript)
+    setVideos((current) => [temporaryVideo, ...current.filter((video) => video.id !== temporaryVideo.id)])
+    setVideoMeta((current) => ({
+      ...current,
+      [temporaryVideo.id]: videoMetaFromVideo(temporaryVideo),
+    }))
+    setChatRecords((current) => {
+      const restoredRecords = guestWorkspace.temporaryChatRecords.map((record) => ({
+        id: record.clientTempId,
+        videoId: temporaryVideo.id,
+        videoTitle: temporaryVideo.title,
+        question: record.question,
+        quote: record.quote,
+        answer: record.answer,
+        createdAt: record.createdAt,
+      }))
+      return [
+        ...current.filter((record) => record.videoId !== temporaryVideo.id),
+        ...restoredRecords,
+      ]
+    })
+  }, [guestWorkspace])
+
+  useEffect(() => {
+    if (!currentUser || showAuthModal || !pendingAction) {
+      return
+    }
+
+    const action = pendingAction
+    const migratedVideoId = pendingMigratedVideoId ?? undefined
+    setPendingAction(null)
+    setPendingMigratedVideoId(null)
+    void executePendingAction(action, migratedVideoId)
+  // executePendingAction intentionally runs after auth state has re-rendered with currentUser.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, pendingAction, pendingMigratedVideoId, showAuthModal])
+
   async function getAccessToken() {
     if (!supabase) {
       throw new Error('Supabase is not configured.')
@@ -894,6 +1138,45 @@ function App() {
     }
 
     return data.session.access_token
+  }
+
+  async function refreshLibraryState() {
+    if (!supabase) {
+      return
+    }
+
+    const [videosResult, notesResult, translationsResult] = await Promise.all([
+      supabase.from('learning_videos').select('*').order('saved_at', { ascending: false }),
+      supabase.from('learning_notes').select('*').order('saved_at', { ascending: false }),
+      supabase.from('learning_translations').select('*'),
+    ])
+
+    const error = videosResult.error ?? notesResult.error ?? translationsResult.error
+    if (error) throw error
+
+    const persistedVideos = ((videosResult.data ?? []) as LearningVideoRow[]).map(rowToVideo)
+    const persistedNotes = ((notesResult.data ?? []) as LearningNoteRow[]).map(rowToNote)
+    const persistedTranslations = rowsToTranslatedSegments((translationsResult.data ?? []) as LearningTranslationRow[])
+    const mergedVideos = [
+      ...persistedVideos,
+      ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
+    ]
+    const mergedIds = [
+      ...persistedVideos.map((video) => video.id),
+      ...initialLibraryIds.filter((id) => !persistedVideos.some((video) => video.id === id)),
+    ]
+
+    setVideos(mergedVideos)
+    setVideoMeta(initialVideoMeta(mergedVideos))
+    setLibraryIds(mergedIds)
+    setSavedNotes(persistedNotes)
+    setChatRecords([])
+    setTranslatedSegments(persistedTranslations)
+
+    if (persistedVideos.length > 0) {
+      setSelectedVideoId(persistedVideos[0].id)
+      setCurrentPosition(persistedVideos[0].lastPositionSec || persistedVideos[0].transcript[0]?.startSec || 0)
+    }
   }
 
   useEffect(() => {
@@ -925,6 +1208,10 @@ function App() {
     const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
       setCurrentUser(toAuthUser(session?.user ?? null))
       if (!session?.user) {
+        setScreen('home')
+        setLibraryIds([])
+        setVideos(catalogVideos)
+        setVideoMeta(initialVideoMeta(catalogVideos))
         setSavedNotes([])
         setChatRecords([])
         setTranslatedSegments({})
@@ -951,43 +1238,9 @@ function App() {
       }
 
       try {
-        const [videosResult, notesResult, translationsResult] = await Promise.all([
-          supabase.from('learning_videos').select('*').order('saved_at', { ascending: false }),
-          supabase.from('learning_notes').select('*').order('saved_at', { ascending: false }),
-          supabase.from('learning_translations').select('*'),
-        ])
-
-        const error = videosResult.error ?? notesResult.error ?? translationsResult.error
-        if (error) throw error
-
-        if (!isMounted) {
-          return
-        }
-
-        const persistedVideos = ((videosResult.data ?? []) as LearningVideoRow[]).map(rowToVideo)
-        const persistedNotes = ((notesResult.data ?? []) as LearningNoteRow[]).map(rowToNote)
-        const persistedTranslations = rowsToTranslatedSegments((translationsResult.data ?? []) as LearningTranslationRow[])
-        const mergedVideos = [
-          ...persistedVideos,
-          ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
-        ]
-        const mergedIds = [
-          ...persistedVideos.map((video) => video.id),
-          ...initialLibraryIds.filter((id) => !persistedVideos.some((video) => video.id === id)),
-        ]
-
-        setVideos(mergedVideos)
-        setVideoMeta(initialVideoMeta(mergedVideos))
-        setLibraryIds(mergedIds)
-        setSavedNotes(persistedNotes)
-        setChatRecords([])
-        setTranslatedSegments(persistedTranslations)
-
-        if (persistedVideos.length > 0) {
-          setSelectedVideoId(persistedVideos[0].id)
-          setCurrentPosition(persistedVideos[0].lastPositionSec || persistedVideos[0].transcript[0]?.startSec || 0)
-        }
+        await refreshLibraryState()
       } catch {
+        if (!isMounted) return
         setToast('Unable to load Supabase library. Check database migration and RLS policies.')
       }
     }
@@ -1166,6 +1419,24 @@ function App() {
 
     return () => window.clearTimeout(timer)
   }, [currentPosition, currentUser, screen, selectedVideo, selectedVideoMeta])
+
+  useEffect(() => {
+    if (!isTemporaryReader || !guestWorkspace) {
+      return
+    }
+
+    const nextPlayedSeconds = Math.max(guestWorkspace.playedSeconds, Math.round(currentPosition))
+    const nextHasStartedWatching = nextPlayedSeconds > 0 || isPlaying
+    if (nextPlayedSeconds === guestWorkspace.playedSeconds && nextHasStartedWatching === guestWorkspace.hasStartedWatching) {
+      return
+    }
+
+    setGuestWorkspace({
+      ...guestWorkspace,
+      playedSeconds: nextPlayedSeconds,
+      hasStartedWatching: nextHasStartedWatching,
+    })
+  }, [currentPosition, guestWorkspace, isPlaying, isTemporaryReader])
 
   useEffect(() => {
     if (!toast) {
@@ -1444,7 +1715,7 @@ function App() {
   function openReader(videoId: string) {
     const video = findVideoById(videos, videoId)
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
-    if (meta.status !== 'done') {
+    if (currentUser && meta.status !== 'done') {
       void updateVideoMeta(videoId, { status: 'learning' })
     }
 
@@ -1529,6 +1800,113 @@ function App() {
     window.addEventListener('pointerup', handlePointerUp)
   }
 
+  function pendingActionKey(action: PendingAction | null) {
+    if (!action) return null
+    return action.type
+  }
+
+  function openAuthModal(message: string, action: PendingAction | null = null) {
+    setAuthModalMessage(message)
+    setPendingAction(action)
+    setAuthMode('login')
+    setAuthError('')
+    setShowAuthModal(true)
+    setGuestWorkspace((current) => current ? {
+      ...current,
+      pendingAction: pendingActionKey(action),
+    } : current)
+  }
+
+  async function postContractJson<T>(path: string, body: unknown, accessToken?: string) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      const error = new Error(data?.error ?? `${path} failed.`)
+      Object.assign(error, { status: response.status })
+      throw error
+    }
+
+    return data as T
+  }
+
+  async function migrateGuestWorkspace(workspace: GuestWorkspace) {
+    const accessToken = await getAccessToken()
+    const body = {
+      temporaryVideo: workspace.temporaryVideo,
+      transcript: workspace.transcript,
+      temporaryChatRecords: workspace.temporaryChatRecords,
+      temporaryNotes: workspace.temporaryNotes,
+      activity: {
+        playedSeconds: workspace.playedSeconds,
+        hasStartedWatching: workspace.hasStartedWatching,
+        hasAskedAI: workspace.hasAskedAI,
+        hasTemporaryNotes: workspace.hasTemporaryNotes,
+        askCount: workspace.askCount,
+      },
+    }
+
+    return postContractJson<GuestMigrateResponse>('/api/guest/migrate', body, accessToken)
+  }
+
+  async function executePendingAction(action: PendingAction | null, migratedVideoId?: string) {
+    if (!action) return
+
+    if (action.type === 'open-library') {
+      setScreen('library')
+      return
+    }
+    if (action.type === 'open-notes') {
+      setScreen('notes')
+      return
+    }
+    if (action.type === 'save-discover-to-inbox') {
+      await saveDiscoverToInbox(action.discoverId)
+      return
+    }
+    if (action.type === 'save-highlight') {
+      if (migratedVideoId) {
+        setToast('Saved to your account.')
+        return
+      }
+      await saveNote('highlight', 'highlight')
+      return
+    }
+    if (action.type === 'add-thought') {
+      setShowNoteModal(true)
+      return
+    }
+    if (action.type === 'save-ai-note') {
+      if (migratedVideoId) {
+        setToast('Saved to your account.')
+        return
+      }
+      const record = chatRecords.find((item) => item.id === action.recordId)
+      if (record) {
+        await saveAiResponseAsNote(record, action.noteType)
+      }
+      return
+    }
+    if (action.type === 'star-note') {
+      await updateNote(action.noteId, { isStarred: true })
+      return
+    }
+    if (action.type === 'edit-tags') {
+      openTagEditor(action.videoId)
+      return
+    }
+    if (action.type === 'save-video') {
+      setToast('Saved to your account.')
+    }
+  }
+
   async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAuthError('')
@@ -1564,9 +1942,21 @@ function App() {
       setAuthPassword('')
       setAuthError('')
 
-      if (authResult.data.session?.user) {
-        setCurrentUser(toAuthUser(authResult.data.session.user))
-        setToast(authMode === 'signup' ? 'Account created. Your workspace is ready.' : 'Logged in.')
+      const authedUser = toAuthUser(authResult.data.session?.user ?? null)
+      if (authedUser) {
+        setCurrentUser(authedUser)
+        let migratedVideoId: string | undefined
+        if (guestWorkspace) {
+          const migrationResult = await migrateGuestWorkspace(guestWorkspace)
+          migratedVideoId = migrationResult.video.id
+          setGuestWorkspace(null)
+          setToast('Saved to your account.')
+        } else {
+          setToast(authMode === 'signup' ? 'Account created. Your workspace is ready.' : 'Logged in.')
+        }
+        await refreshLibraryState()
+        setShowAuthModal(false)
+        setPendingMigratedVideoId(migratedVideoId ?? null)
       } else {
         setToast('账号已创建，请打开确认邮件完成验证后再登录。')
       }
@@ -1584,7 +1974,7 @@ function App() {
     setScreen('home')
     setVideos(catalogVideos)
     setVideoMeta(initialVideoMeta(catalogVideos))
-    setLibraryIds(initialLibraryIds)
+    setLibraryIds([])
     setSelectedVideoId(initialLibraryIds[0])
     setCurrentPosition(videoById(initialLibraryIds[0]).lastPositionSec)
     setSavedNotes([])
@@ -1594,13 +1984,16 @@ function App() {
     setPendingChatRequest(null)
     setFailedChatRequest(null)
     setShowAddModal(false)
+    setShowAuthModal(false)
+    setGuestWorkspace(null)
+    setPendingAction(null)
     setTranscriptSelection(null)
     lastSavedProgressRef.current = {}
   }
 
   async function handleImportUrl() {
     if (!currentUser) {
-      setToast('Please log in before importing a YouTube URL.')
+      openAuthModal('登录后保存视频到你的学习库，并继续学习进度。', { type: 'save-video' })
       return
     }
 
@@ -1615,21 +2008,13 @@ function App() {
 
     try {
       const accessToken = await getAccessToken()
-      const response = await fetch('/api/youtube/import', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url }),
-      })
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'Failed to import this YouTube URL.')
-      }
-
-      const importedVideo = data as DemoVideo
+      const data = await postContractJson<ImportResponse>('/api/youtube/import', {
+        youtubeUrl: url,
+        youtubeId: extractYouTubeId(url),
+        status: 'learning',
+        forceReopen: false,
+      }, accessToken)
+      const importedVideo = contractVideoToDemoVideo(data.video, data.video.transcript ?? [])
       setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
       setVideoMeta((current) => ({
         ...current,
@@ -1654,12 +2039,151 @@ function App() {
     }
   }
 
+  function findDiscoverItem(discoverId: string) {
+    return discoveryItems.find((item) => item.id === discoverId)
+  }
+
+  function findSavedDiscoveryVideo(discoverId: string) {
+    const item = findDiscoverItem(discoverId)
+    if (!item) return null
+
+    return videos.find((video) => (
+      libraryIds.includes(video.id) &&
+      (video.youtubeId === item.youtubeId || video.youtubeUrl === item.youtubeUrl)
+    )) ?? null
+  }
+
+  async function importDiscoverVideo(discoverId: string, status: 'inbox' | 'learning', forceReopen = false) {
+    const item = findDiscoverItem(discoverId)
+    if (!item) {
+      throw new Error('Discover item not found.')
+    }
+    if (!currentUser) {
+      openAuthModal(
+        '登录后保存这个视频到你的学习库。',
+        status === 'inbox' ? { type: 'save-discover-to-inbox', discoverId } : { type: 'save-video' },
+      )
+      throw new Error('Please log in first.')
+    }
+
+    const accessToken = await getAccessToken()
+    const data = await postContractJson<ImportResponse>('/api/youtube/import', {
+      youtubeUrl: item.youtubeUrl,
+      youtubeId: item.youtubeId,
+      status,
+      forceReopen,
+    }, accessToken)
+    return contractVideoToDemoVideo(data.video, data.video.transcript ?? [])
+  }
+
+  async function saveDiscoverToInbox(discoverId: string) {
+    setIsImporting(true)
+    try {
+      const importedVideo = await importDiscoverVideo(discoverId, 'inbox')
+      setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
+      setVideoMeta((current) => ({
+        ...current,
+        [importedVideo.id]: videoMetaFromVideo(importedVideo),
+      }))
+      setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
+      setPreviewDiscoverId(discoverId)
+      setToast('Saved to Inbox.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save to Inbox.'
+      if (message !== 'Please log in first.') setToast(message)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  async function startLearningFromDiscover(discoverId: string) {
+    const existing = findSavedDiscoveryVideo(discoverId)
+    if (existing && (videoMeta[existing.id]?.status === 'learning' || videoMeta[existing.id]?.status === 'done')) {
+      openReader(existing.id)
+      setPreviewDiscoverId(null)
+      return
+    }
+
+    setIsImporting(true)
+    try {
+      const importedVideo = await importDiscoverVideo(discoverId, 'learning')
+      setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
+      setVideoMeta((current) => ({
+        ...current,
+        [importedVideo.id]: videoMetaFromVideo(importedVideo),
+      }))
+      setLibraryIds((current) => [importedVideo.id, ...current.filter((id) => id !== importedVideo.id)])
+      setPreviewDiscoverId(null)
+      openReader(importedVideo.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start learning.'
+      if (message !== 'Please log in first.') setToast(message)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  async function startGuestWatching(discoverId: string) {
+    const item = findDiscoverItem(discoverId)
+    if (!item) return
+
+    if (guestWorkspace?.temporaryVideo && guestWorkspace.temporaryVideo.youtubeId !== item.youtubeId) {
+      openAuthModal('游客一次只能临时解析 1 个视频。登录后可以保存更多视频并继续学习。', { type: 'save-video' })
+      return
+    }
+
+    setIsImporting(true)
+    try {
+      const preview = await postContractJson<PreviewResponse>('/api/youtube/preview', {
+        youtubeUrl: item.youtubeUrl,
+        youtubeId: item.youtubeId,
+      })
+
+      const workspace: GuestWorkspace = {
+        temporaryVideo: preview.video,
+        transcript: preview.transcript,
+        temporaryChatRecords: guestWorkspace?.temporaryChatRecords ?? [],
+        temporaryNotes: guestWorkspace?.temporaryNotes ?? [],
+        askCount: guestWorkspace?.askCount ?? 0,
+        playedSeconds: guestWorkspace?.playedSeconds ?? 0,
+        hasStartedWatching: guestWorkspace?.hasStartedWatching ?? false,
+        hasAskedAI: guestWorkspace?.hasAskedAI ?? false,
+        hasTemporaryNotes: guestWorkspace?.hasTemporaryNotes ?? false,
+        createdAt: guestWorkspace?.createdAt ?? new Date().toISOString(),
+        pendingAction: guestWorkspace?.pendingAction ?? null,
+      }
+      const temporaryVideo = contractVideoToDemoVideo(preview.video, preview.transcript)
+      setGuestWorkspace(workspace)
+      setVideos((current) => [temporaryVideo, ...current.filter((video) => video.id !== temporaryVideo.id)])
+      setVideoMeta((current) => ({
+        ...current,
+        [temporaryVideo.id]: videoMetaFromVideo(temporaryVideo),
+      }))
+      setSelectedVideoId(temporaryVideo.id)
+      setCurrentPosition(preview.transcript[0]?.startSec ?? 0)
+      setRightTab(preview.transcript.length ? 'subtitle' : 'info')
+      setScreen('reader')
+      setPreviewDiscoverId(null)
+      setToast('Temporary video opened.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to preview this video.'
+      setToast(message)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   async function sendChatQuestion(
     questionInput = chatPrompt,
     contextOverride?: Partial<Pick<PendingChatRequest, 'quote' | 'timestamp' | 'selectedSubtitle'>>,
   ) {
-    if (!currentUser) {
-      setToast('Please log in before asking AI.')
+    if (!currentUser && !isTemporaryReader) {
+      openAuthModal('登录后可以围绕保存的视频继续向 AI 提问。')
+      return
+    }
+
+    if (!currentUser && (guestWorkspace?.askCount ?? 0) >= 3) {
+      openAuthModal('游客最多可以 Ask AI 3 次。登录后可以继续提问并保存对话。', { type: 'save-video' })
       return
     }
 
@@ -1675,12 +2199,20 @@ function App() {
     const contextSubtitle = hasSubtitleOverride
       ? contextOverride?.selectedSubtitle ?? null
       : selectedSubtitlePayload(chatContextSelection) ?? selectedSubtitlePayload(transcriptSelection)
+    const fallbackSubtitle = activeContextSegment
+      ? { text: activeContextSegment.text, startSec: activeContextSegment.startSec, endSec: activeContextSegment.endSec }
+      : {
+          text: transcript.slice(0, 3).map((segment) => segment.text).join(' '),
+          startSec: transcript[0]?.startSec ?? currentPosition,
+          endSec: transcript[2]?.endSec ?? currentPosition,
+        }
+    const askSubtitle = contextSubtitle ?? fallbackSubtitle
     const pendingRequest: PendingChatRequest = {
       id: `pending-${Date.now()}`,
       question,
       quote: contextQuote,
       timestamp: contextTimestamp,
-      selectedSubtitle: contextSubtitle,
+      selectedSubtitle: askSubtitle,
     }
 
     setRightTab('chat')
@@ -1692,26 +2224,22 @@ function App() {
     setToast('Asking Kimi about this video...')
 
     try {
-      const accessToken = await getAccessToken()
-      const response = await fetch('/api/ask', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          videoId: selectedVideo.id,
-          question,
-          selectedSubtitle: contextSubtitle,
-          currentPlaybackTime: currentPosition,
-          answerLanguage: 'zh-CN',
-        }),
-      })
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'AI request failed.')
-      }
+      const accessToken = currentUser ? await getAccessToken() : undefined
+      const data = await postContractJson<{
+        answer?: unknown
+        citations?: unknown
+        followUps?: unknown
+        saveCandidates?: unknown
+      }>('/api/ask', {
+        videoTitle: selectedVideo.title,
+        videoId: selectedVideo.id,
+        selectedSubtitle: askSubtitle,
+        nearbySubtitles: [],
+        currentPlaybackTime: currentPosition,
+        userQuestion: question,
+        answerLanguage: 'zh-CN',
+        mode: currentUser ? 'authenticated' : 'guest',
+      }, accessToken)
 
       const record: ChatRecord = {
         id: `chat-${Date.now()}`,
@@ -1726,6 +2254,23 @@ function App() {
         createdAt: new Date().toISOString(),
       }
       setChatRecords((current) => [...current, record])
+      if (!currentUser && guestWorkspace) {
+        setGuestWorkspace({
+          ...guestWorkspace,
+          askCount: guestWorkspace.askCount + 1,
+          hasAskedAI: true,
+          temporaryChatRecords: [
+            ...guestWorkspace.temporaryChatRecords,
+            {
+              clientTempId: record.id,
+              question,
+              quote: contextQuote,
+              answer: record.answer,
+              createdAt: record.createdAt,
+            },
+          ],
+        })
+      }
       setPendingChatRequest(null)
       setChatContextSelection(null)
       clearNativeSelection()
@@ -1787,31 +2332,24 @@ function App() {
   async function translateBatch(batch: TranslationBatch) {
     const numberedLines = batch.segments.map((segment, index) => `${index + 1}. ${segment.text}`).join('\n')
     const accessToken = await getAccessToken()
-    const response = await fetch('/api/ask', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        purpose: 'translate',
+    const data = await postContractJson<{ answer?: unknown }>('/api/ask',
+      {
+        videoTitle: selectedVideo.title,
         videoId: selectedVideo.id,
-        question:
-          `Translate every numbered transcript line into natural ${batch.language}. Keep the original numbering and return exactly ${batch.segments.length} lines. Do not summarize, merge, explain, or add extra text.`,
         selectedSubtitle: {
           text: numberedLines,
           startSec: batch.segments[0]?.startSec ?? currentPosition,
           endSec: batch.segments[batch.segments.length - 1]?.endSec ?? currentPosition,
         },
+        nearbySubtitles: [],
         currentPlaybackTime: currentPosition,
+        userQuestion:
+          `Translate every numbered transcript line into natural ${batch.language}. Keep the original numbering and return exactly ${batch.segments.length} lines. Do not summarize, merge, explain, or add extra text.`,
         answerLanguage: batch.language,
-      }),
-    })
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data?.error ?? 'Translation failed.')
-    }
+        mode: 'authenticated',
+      },
+      accessToken,
+    )
 
     const translatedLines = parseNumberedTranslations(String(data.answer ?? ''), batch.segments.length)
     return batch.segments.reduce<Record<string, string>>((acc, segment, index) => {
@@ -2004,6 +2542,39 @@ function App() {
       return
     }
 
+    if (!currentUser) {
+      if (guestWorkspace && guestWorkspace.temporaryNotes.length < 3) {
+        const content = source === 'highlight' ? noteQuote : noteDraft
+        setGuestWorkspace({
+          ...guestWorkspace,
+          hasTemporaryNotes: true,
+          temporaryNotes: [
+            ...guestWorkspace.temporaryNotes,
+            {
+              clientTempId: `note-temp-${Date.now()}`,
+              type: type === 'highlight' || type === 'thought' || type === 'videoBrief' ? 'explanation' : type,
+              source,
+              quote: noteQuote,
+              timestampLabel: noteTimestamp,
+              note: source === 'thought' ? content : '',
+              content,
+              takeaway: source === 'thought' ? content : '',
+              tags: selectedVideoMeta.tags,
+            },
+          ],
+        })
+      } else if (guestWorkspace && guestWorkspace.temporaryNotes.length >= 3) {
+        openAuthModal('游客最多可以临时保存 3 条 notes。登录后可以继续保存并同步到 Notes。', {
+          type: source === 'thought' ? 'add-thought' : 'save-highlight',
+        })
+        return
+      }
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
+        type: source === 'thought' ? 'add-thought' : 'save-highlight',
+      })
+      return
+    }
+
     const content = source === 'highlight' ? noteQuote : noteDraft
     const note: SavedNote = {
       id: `${selectedVideo.id}-${noteTimestamp}-${Date.now()}`,
@@ -2047,6 +2618,46 @@ function App() {
   }
 
   async function saveAiResponseAsNote(record: ChatRecord, type: AiNoteType = aiSaveType, candidate?: AiSaveCandidate) {
+    if (!currentUser) {
+      if (guestWorkspace && guestWorkspace.temporaryNotes.length < 3) {
+        const firstCitation = record.citations?.[0]
+        const noteQuote = candidate?.quote || record.quote || firstCitation?.text || record.question
+        const noteTimestamp = candidate?.timestamp || (firstCitation ? formatTime(firstCitation.startSec) : selectedTimestamp)
+        const noteContent = candidate?.content || record.answer
+        setGuestWorkspace({
+          ...guestWorkspace,
+          hasTemporaryNotes: true,
+          temporaryNotes: [
+            ...guestWorkspace.temporaryNotes,
+            {
+              clientTempId: `note-temp-${Date.now()}`,
+              type,
+              source: 'ai',
+              quote: noteQuote,
+              timestampLabel: noteTimestamp,
+              note: '',
+              content: noteContent,
+              takeaway: '',
+              tags: selectedVideoMeta.tags,
+            },
+          ],
+        })
+      } else if (guestWorkspace && guestWorkspace.temporaryNotes.length >= 3) {
+        openAuthModal('游客最多可以临时保存 3 条 notes。登录后可以继续保存并同步到 Notes。', {
+          type: 'save-ai-note',
+          recordId: record.id,
+          noteType: type,
+        })
+        return
+      }
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
+        type: 'save-ai-note',
+        recordId: record.id,
+        noteType: type,
+      })
+      return
+    }
+
     const firstCitation = record.citations?.[0]
     const noteQuote = candidate?.quote || record.quote || firstCitation?.text || record.question
     const noteTimestamp = candidate?.timestamp || (firstCitation ? formatTime(firstCitation.startSec) : selectedTimestamp)
@@ -2110,11 +2721,20 @@ function App() {
       setToast('Highlight transcript text first.')
       return
     }
+    if (!currentUser) {
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', { type: 'add-thought' })
+      return
+    }
     setNoteDraft('')
     setShowNoteModal(true)
   }
 
   async function updateVideoMeta(videoId: string, patch: Partial<VideoMeta>) {
+    if (!currentUser) {
+      openAuthModal('登录后可以保存视频、继续学习进度，并管理所有学习状态。', { type: 'save-video' })
+      return
+    }
+
     const previousMeta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
     const nextMeta = {
       ...previousMeta,
@@ -2144,6 +2764,10 @@ function App() {
   }
 
   function openTagEditor(videoId: string) {
+    if (!currentUser) {
+      openAuthModal('登录后可以编辑标签并同步到你的学习库。', { type: 'edit-tags', videoId })
+      return
+    }
     setTagModalVideoId(videoId)
     setTagDraft('')
     setShowTagModal(true)
@@ -2223,7 +2847,10 @@ function App() {
 
   async function updateNote(noteId: string, patch: Partial<SavedNote>) {
     if (!currentUser || !supabase) {
-      setToast('Please log in before updating notes.')
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
+        type: 'star-note',
+        noteId,
+      })
       return false
     }
 
@@ -2291,6 +2918,20 @@ function App() {
     if (didUpdate) {
       setToast('Note updated.')
     }
+  }
+
+  function handleNavigate(nextScreen: Screen) {
+    if (!currentUser && nextScreen === 'library') {
+      openAuthModal('登录后查看你的学习库。你可以保存视频、继续学习进度，并管理所有学习状态。', { type: 'open-library' })
+      return
+    }
+
+    if (!currentUser && nextScreen === 'notes') {
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', { type: 'open-notes' })
+      return
+    }
+
+    setScreen(nextScreen)
   }
 
   function renderChatThread() {
@@ -2447,7 +3088,7 @@ function App() {
               <p>Recent Learning</p>
               <h3>Continue where your last video became knowledge</h3>
             </div>
-            <button className="text-button" type="button" onClick={() => setScreen('library')}>
+            <button className="text-button" type="button" onClick={() => handleNavigate('library')}>
               View All
             </button>
           </div>
@@ -2485,25 +3126,42 @@ function App() {
             </div>
           </div>
           <div className="home-discovery-waterfall">
-            {discoveryItems.map((item, index) => (
-              <button
-                key={item.id}
-                className="home-video-card"
-                type="button"
-                onClick={() => setShowAddModal(true)}
-              >
-                <div className="home-video-card__thumb" data-tone={index % 4}>
-                  <span>{item.duration}</span>
-                </div>
-                <div className="home-video-card__body">
-                  <strong>{item.title}</strong>
-                  <div>
-                    <span>{item.views} views</span>
-                    <span>{item.likes} likes</span>
+            {discoveryItems.map((item, index) => {
+              const savedVideo = findSavedDiscoveryVideo(item.id)
+              const savedMeta = savedVideo ? videoMeta[savedVideo.id] : null
+              const statusLabel = savedMeta?.status === 'inbox'
+                ? 'In Inbox'
+                : savedMeta?.status === 'learning'
+                  ? 'Continue learning'
+                  : savedMeta?.status === 'done'
+                    ? 'Done'
+                    : null
+
+              return (
+                <button
+                  key={item.id}
+                  className="home-video-card"
+                  type="button"
+                  onClick={() => setPreviewDiscoverId(item.id)}
+                >
+                  <div className="home-video-card__thumb" data-tone={index % 4}>
+                    <span>{item.duration}</span>
                   </div>
-                </div>
-              </button>
-            ))}
+                  <div className="home-video-card__body">
+                    <strong>{item.title}</strong>
+                    <div>
+                      <span>{item.views} views</span>
+                      <span>{item.likes} likes</span>
+                    </div>
+                    {statusLabel ? (
+                      <small className="discover-status">
+                        {savedMeta?.isFavourite ? '★ ' : null}{statusLabel}
+                      </small>
+                    ) : null}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </section>
       </div>
@@ -2640,90 +3298,6 @@ function App() {
     )
   }
 
-  function renderAuthScreen() {
-    return (
-      <main className="auth-shell">
-        <section className="auth-panel">
-          <div className="auth-copy">
-            <p>English Video Learning</p>
-            <h1>Sign in to your learning workspace</h1>
-            <span>Imported videos, notes, watch progress and saved AI answers are stored under your account.</span>
-          </div>
-
-          <form className="auth-card" onSubmit={handleAuthSubmit}>
-            <div className="auth-card__switch">
-              <button
-                className={authMode === 'login' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
-                type="button"
-                onClick={() => {
-                  setAuthMode('login')
-                  setAuthError('')
-                }}
-              >
-                Log in
-              </button>
-              <button
-                className={authMode === 'signup' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
-                type="button"
-                onClick={() => {
-                  setAuthMode('signup')
-                  setAuthError('')
-                }}
-              >
-                Sign up
-              </button>
-            </div>
-
-            {authMode === 'signup' ? (
-              <label className="auth-field">
-                <span>Name</span>
-                <input
-                  value={authName}
-                  onChange={(event) => setAuthName(event.target.value)}
-                  placeholder="Your name"
-                  autoComplete="name"
-                />
-              </label>
-            ) : null}
-
-            <label className="auth-field">
-              <span>Email</span>
-              <input
-                value={authEmail}
-                onChange={(event) => setAuthEmail(event.target.value)}
-                placeholder="you@example.com"
-                type="email"
-                autoComplete="email"
-                required
-              />
-            </label>
-
-            <label className="auth-field">
-              <span>Password</span>
-              <input
-                value={authPassword}
-                onChange={(event) => setAuthPassword(event.target.value)}
-                placeholder="At least 8 characters"
-                type="password"
-                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                required
-              />
-            </label>
-
-            {!isSupabaseConfigured ? (
-              <p className="auth-error">Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.</p>
-            ) : null}
-            {authError ? <p className="auth-error">{authError}</p> : null}
-
-            <button className="secondary-button secondary-button--strong auth-submit" type="submit" disabled={isAuthBusy || !isSupabaseConfigured}>
-              {isAuthBusy ? 'Working...' : authMode === 'signup' ? 'Create account' : 'Log in'}
-            </button>
-          </form>
-        </section>
-      </main>
-    )
-  }
-
   if (!isAuthChecked) {
     return (
       <main className="auth-shell">
@@ -2733,10 +3307,6 @@ function App() {
         </section>
       </main>
     )
-  }
-
-  if (!currentUser) {
-    return renderAuthScreen()
   }
 
   return (
@@ -2753,16 +3323,19 @@ function App() {
           <div className="sidebar__stack">
             {sidebarCollections.map((item) => {
               const Icon = item.icon
+              const isLocked = !currentUser && item.screen !== 'home'
+              const isSelected = screen === item.screen && !isLocked
 
               return (
                 <button
                   key={item.label}
-                  className={`nav-link nav-link--subtle ${screen === item.screen ? 'nav-link--selected' : ''}`}
+                  className={`nav-link nav-link--subtle ${isSelected ? 'nav-link--selected' : ''} ${isLocked ? 'nav-link--locked' : ''}`}
                   type="button"
-                  onClick={() => setScreen(item.screen)}
+                  onClick={() => handleNavigate(item.screen)}
                 >
                   <Icon size={17} />
                   <span>{item.label}</span>
+                  {isLocked ? <Lock size={14} /> : null}
                 </button>
               )
             })}
@@ -2770,20 +3343,33 @@ function App() {
         </nav>
 
         <div className="sidebar__account">
-          <button
-            className="account-button"
-            type="button"
-            aria-label="User menu"
-            aria-expanded={showUserMenu}
-            onClick={() => setShowUserMenu((current) => !current)}
-          >
-            <span className="account-button__avatar">
-              <UserCircle size={22} />
-            </span>
-            <span className="account-button__text">我的账户</span>
-          </button>
+          {currentUser ? (
+            <button
+              className="account-button"
+              type="button"
+              aria-label="User menu"
+              aria-expanded={showUserMenu}
+              onClick={() => setShowUserMenu((current) => !current)}
+            >
+              <span className="account-button__avatar">
+                <UserCircle size={22} />
+              </span>
+              <span className="account-button__text">我的账户</span>
+            </button>
+          ) : (
+            <button
+              className="account-button"
+              type="button"
+              onClick={() => openAuthModal('登录后保存你的学习进度、笔记和 AI 对话。')}
+            >
+              <span className="account-button__avatar">
+                <UserCircle size={22} />
+              </span>
+              <span className="account-button__text">Sign In</span>
+            </button>
+          )}
 
-          {showUserMenu ? (
+          {currentUser && showUserMenu ? (
             <div className="account-menu">
               <button
                 type="button"
@@ -2971,6 +3557,12 @@ function App() {
                 <span>观知</span>
               </button>
 
+              {isTemporaryReader ? (
+                <div className="reader-temp-status">
+                  Temporary video · Log in to save progress and notes
+                </div>
+              ) : null}
+
               <div className="reader-topbar__account">
                 {currentUser ? (
                   <button
@@ -2986,10 +3578,7 @@ function App() {
                   <button
                     className="reader-signin-button"
                     type="button"
-                    onClick={() => {
-                      setAuthMode('login')
-                      setAuthError('')
-                    }}
+                    onClick={() => openAuthModal('登录后可以保存这个临时视频的学习进度和笔记。', { type: 'save-video' })}
                   >
                     Sign In
                   </button>
@@ -3383,6 +3972,99 @@ function App() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {previewDiscoverItem ? (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="preview-modal" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }}>
+              <div className="preview-modal__thumb" data-tone={discoveryItems.findIndex((item) => item.id === previewDiscoverItem.id) % 4}>
+                <span>{previewDiscoverItem.duration}</span>
+              </div>
+              <div className="preview-modal__body">
+                <button className="icon-button icon-button--ghost preview-modal__close" type="button" onClick={() => setPreviewDiscoverId(null)}>
+                  <X size={18} />
+                </button>
+                <div className="preview-modal__meta">
+                  <span>{previewDiscoverItem.channel}</span>
+                  <span>{previewDiscoverItem.duration}</span>
+                  {previewDiscoverItem.difficulty ? <span>{previewDiscoverItem.difficulty}</span> : null}
+                </div>
+                <h3>{previewDiscoverItem.title}</h3>
+                <p>{previewDiscoverItem.reason}</p>
+                <section>
+                  <strong>What you will learn</strong>
+                  <ul>
+                    {previewDiscoverItem.learnBullets.map((bullet) => (
+                      <li key={bullet}>{bullet}</li>
+                    ))}
+                  </ul>
+                </section>
+                <div className="tag-row tag-row--compact">
+                  {previewDiscoverItem.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                </div>
+                <div className="preview-modal__actions">
+                  {currentUser ? (
+                    <>
+                      <button
+                        className="secondary-button secondary-button--strong"
+                        type="button"
+                        disabled={isImporting}
+                        onClick={() => void startLearningFromDiscover(previewDiscoverItem.id)}
+                      >
+                        {findSavedDiscoveryVideo(previewDiscoverItem.id)
+                          ? (videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'done'
+                              ? 'Review again'
+                              : videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'learning'
+                                ? 'Continue learning'
+                                : 'Start learning')
+                          : 'Start learning'}
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={isImporting}
+                        onClick={() => void saveDiscoverToInbox(previewDiscoverItem.id)}
+                      >
+                        {videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'inbox' ? 'Saved to Inbox' : 'Save to Inbox'}
+                      </button>
+                      {videoMeta[findSavedDiscoveryVideo(previewDiscoverItem.id)?.id ?? '']?.status === 'inbox' ? (
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            setPreviewDiscoverId(null)
+                            handleNavigate('library')
+                          }}
+                        >
+                          View in Library
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="secondary-button secondary-button--strong"
+                        type="button"
+                        disabled={isImporting}
+                        onClick={() => void startGuestWatching(previewDiscoverItem.id)}
+                      >
+                        Start watching
+                      </button>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => openAuthModal('登录后可以保存视频、继续学习进度，并管理所有学习状态。', { type: 'save-discover-to-inbox', discoverId: previewDiscoverItem.id })}
+                      >
+                        Log in to save
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showAddModal ? (
           <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.form
@@ -3505,6 +4187,95 @@ function App() {
                 </div>
               </div>
             </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showAuthModal ? (
+          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.form
+              className="auth-card auth-card--modal"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              onSubmit={handleAuthSubmit}
+            >
+              <div className="note-modal__header">
+                <strong>{authMode === 'signup' ? 'Create account' : 'Sign in'}</strong>
+                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowAuthModal(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+              <p className="auth-modal-message">{authModalMessage}</p>
+              <div className="auth-card__switch">
+                <button
+                  className={authMode === 'login' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('login')
+                    setAuthError('')
+                  }}
+                >
+                  Log in
+                </button>
+                <button
+                  className={authMode === 'signup' ? 'auth-card__switch-item auth-card__switch-item--active' : 'auth-card__switch-item'}
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('signup')
+                    setAuthError('')
+                  }}
+                >
+                  Sign up
+                </button>
+              </div>
+
+              {authMode === 'signup' ? (
+                <label className="auth-field">
+                  <span>Name</span>
+                  <input
+                    value={authName}
+                    onChange={(event) => setAuthName(event.target.value)}
+                    placeholder="Your name"
+                    autoComplete="name"
+                  />
+                </label>
+              ) : null}
+
+              <label className="auth-field">
+                <span>Email</span>
+                <input
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  autoComplete="email"
+                  required
+                />
+              </label>
+
+              <label className="auth-field">
+                <span>Password</span>
+                <input
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  type="password"
+                  autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                  required
+                />
+              </label>
+
+              {!isSupabaseConfigured ? (
+                <p className="auth-error">Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.</p>
+              ) : null}
+              {authError ? <p className="auth-error">{authError}</p> : null}
+
+              <button className="secondary-button secondary-button--strong auth-submit" type="submit" disabled={isAuthBusy || !isSupabaseConfigured}>
+                {isAuthBusy ? 'Working...' : authMode === 'signup' ? 'Create account' : 'Log in'}
+              </button>
+            </motion.form>
           </motion.div>
         ) : null}
       </AnimatePresence>
