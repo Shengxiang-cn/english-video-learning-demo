@@ -882,6 +882,7 @@ function App() {
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState('')
+  const [authSuccess, setAuthSuccess] = useState('')
   const [isAuthBusy, setIsAuthBusy] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [authModalMessage, setAuthModalMessage] = useState('登录后保存你的学习进度、笔记和 AI 对话。')
@@ -1726,6 +1727,7 @@ function App() {
     setPendingAction(action)
     setAuthMode('login')
     setAuthError('')
+    setAuthSuccess('')
     setShowAuthModal(true)
     setGuestWorkspace((current) => current ? {
       ...current,
@@ -1826,6 +1828,7 @@ function App() {
   async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setAuthError('')
+    setAuthSuccess('')
     setIsAuthBusy(true)
 
     if (!supabase) {
@@ -1855,6 +1858,20 @@ function App() {
         throw authResult.error
       }
 
+      if (authMode === 'signup') {
+        setAuthPassword('')
+        setAuthError('')
+        setAuthMode('login')
+        if (authResult.data.session?.user) {
+          await supabase.auth.signOut().catch(() => null)
+          setCurrentUser(null)
+          setAuthSuccess('恭喜注册成功，可以使用你的账号登录了。')
+        } else {
+          setAuthSuccess('账号已创建，请打开确认邮件完成验证后再登录。')
+        }
+        return
+      }
+
       setAuthPassword('')
       setAuthError('')
 
@@ -1868,7 +1885,7 @@ function App() {
           setGuestWorkspace(null)
           setToast('Saved to your account.')
         } else {
-          setToast(authMode === 'signup' ? 'Account created. Your workspace is ready.' : 'Logged in.')
+          setToast('Logged in.')
         }
         await refreshLibraryState()
         setShowAuthModal(false)
@@ -4113,6 +4130,7 @@ function App() {
                   onClick={() => {
                     setAuthMode('login')
                     setAuthError('')
+                    setAuthSuccess('')
                   }}
                 >
                   Log in
@@ -4123,6 +4141,7 @@ function App() {
                   onClick={() => {
                     setAuthMode('signup')
                     setAuthError('')
+                    setAuthSuccess('')
                   }}
                 >
                   Sign up
@@ -4168,6 +4187,7 @@ function App() {
               {!isSupabaseConfigured ? (
                 <p className="auth-error">Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.</p>
               ) : null}
+              {authSuccess ? <p className="auth-success">{authSuccess}</p> : null}
               {authError ? <p className="auth-error">{authError}</p> : null}
 
               <button className="secondary-button secondary-button--strong auth-submit" type="submit" disabled={isAuthBusy || !isSupabaseConfigured}>

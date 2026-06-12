@@ -161,6 +161,16 @@
   line-height: 1.45;
 }
 
+.auth-success {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #b9e4c8;
+  border-radius: 12px;
+  background: #f0fbf4;
+  color: #216e3b;
+  line-height: 1.45;
+}
+
 .auth-submit {
   justify-content: center;
   min-height: 46px;
