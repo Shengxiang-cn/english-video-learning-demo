@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, startTransition, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -275,13 +275,6 @@ type TranslationBatch = {
   segments: DemoVideo['transcript']
 }
 
-type TranslationStatus = {
-  total: number
-  completed: number
-  failed: TranslationBatch[]
-  lastError: string
-}
-
 function getAuthRedirectUrl() {
   return typeof window === 'undefined' ? undefined : window.location.origin
 }
@@ -455,14 +448,7 @@ const demoNotebookNotes: SavedNote[] = [
 ]
 
 const defaultImportUrl = 'https://www.youtube.com/watch?v=3Y8aq_ofEVs'
-const translationLanguages = [
-  { label: '中文', value: 'Simplified Chinese' },
-  { label: 'Japanese', value: 'Japanese' },
-  { label: 'Korean', value: 'Korean' },
-  { label: 'Spanish', value: 'Spanish' },
-  { label: 'French', value: 'French' },
-]
-const defaultTranslationLanguage = translationLanguages[0].value
+const defaultTranslationLanguage = 'Simplified Chinese'
 
 function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -921,14 +907,7 @@ function App() {
   const [aiSaveType, setAiSaveType] = useState<AiNoteType>('explanation')
   const [activeAiSaveMenuId, setActiveAiSaveMenuId] = useState<string | null>(null)
   const [copiedChatMessageId, setCopiedChatMessageId] = useState<string | null>(null)
-  const [translationLanguage, setTranslationLanguage] = useState(defaultTranslationLanguage)
   const [isTranslating, setIsTranslating] = useState(false)
-  const [translationStatus, setTranslationStatus] = useState<TranslationStatus>({
-    total: 0,
-    completed: 0,
-    failed: [],
-    lastError: '',
-  })
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
   const [isTranscriptFollowing, setIsTranscriptFollowing] = useState(true)
   const [showSyncPrompt, setShowSyncPrompt] = useState(false)
@@ -2386,16 +2365,8 @@ function App() {
     }
 
     setIsTranslating(true)
-    setTranslationStatus({
-      total: totalSegments,
-      completed: completedOffset,
-      failed: [],
-      lastError: '',
-    })
 
     let completed = completedOffset
-    const failed: TranslationBatch[] = []
-    let lastError = ''
     let cachedSegments = translationSegmentsForVideo(translatedSegments, selectedVideo.id, batches[0].language)
 
     for (const batch of batches) {
@@ -2416,33 +2387,19 @@ function App() {
         })
         completed += batch.segments.length
       } catch (error) {
-        failed.push(batch)
-        lastError = error instanceof Error ? error.message : 'Translation failed.'
+        const message = error instanceof Error ? error.message : 'Translation failed.'
         await persistTranslationCache(selectedVideo.id, batch.language, cachedSegments, 'failed').catch(() => null)
-        setTranslationStatus({
-          total: totalSegments,
-          completed: Math.min(completed, totalSegments),
-          failed,
-          lastError,
-        })
         setIsTranslating(false)
-        setToast('Translation paused after a failed batch. Retry failed or continue later.')
+        setToast(message)
         return
       }
-
-      setTranslationStatus({
-        total: totalSegments,
-        completed: Math.min(completed, totalSegments),
-        failed,
-        lastError,
-      })
     }
 
     setIsTranslating(false)
-    setToast(`${batches[0].language} captions are ready.`)
+    setToast('中文字幕已准备好。')
   }
 
-  async function handleTranslateCaptions(language = translationLanguage) {
+  async function handleTranslateCaptions(language = defaultTranslationLanguage) {
     setShowTranslations(true)
 
     if (transcript.length === 0) {
@@ -2454,13 +2411,7 @@ function App() {
     )
 
     if (segmentsToTranslate.length === 0) {
-      setTranslationStatus({
-        total: transcript.length,
-        completed: transcript.length,
-        failed: [],
-        lastError: '',
-      })
-      setToast(`${language} captions are already translated.`)
+      setToast('中文字幕已准备好。')
       return
     }
 
@@ -2471,19 +2422,8 @@ function App() {
       segments: segmentsToTranslate.slice(index * batchSize, index * batchSize + batchSize),
     }))
 
-    setToast(`Translating full transcript to ${language}...`)
+    setToast('正在翻译中文字幕...')
     await runTranslationBatches(batches, transcript.length, transcript.length - segmentsToTranslate.length)
-  }
-
-  async function handleRetryFailedTranslations() {
-    if (translationStatus.failed.length === 0) {
-      await handleTranslateCaptions()
-      return
-    }
-
-    const failedBatches = translationStatus.failed
-    setToast('Retrying failed translation batches...')
-    await runTranslationBatches(failedBatches, translationStatus.total || transcript.length, translationStatus.completed)
   }
 
   function handleJumpToCurrentSubtitle() {
@@ -2494,9 +2434,21 @@ function App() {
     scrollActiveTranscriptLine()
   }
 
-  function handleTranslationLanguageChange(language: string) {
-    setTranslationLanguage(language)
-    void handleTranslateCaptions(language)
+  function handleTranslateTabClick() {
+    if (rightTab !== 'subtitle') {
+      setRightTab('subtitle')
+      if (!showTranslations) {
+        void handleTranslateCaptions()
+      }
+      return
+    }
+
+    if (showTranslations) {
+      setShowTranslations(false)
+      return
+    }
+
+    void handleTranslateCaptions()
   }
 
   function handleAskSelectedQuote() {
@@ -3602,57 +3554,29 @@ function App() {
               <div className="right-pane__tabs right-pane__tabs--with-tools">
                 <div className="right-pane__tab-list">
                   {(['info', 'note', 'chat', 'subtitle'] as RightTab[]).map((tab) => (
-                    <button
-                      key={tab}
-                      className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
-                      type="button"
-                      onClick={() => setRightTab(tab)}
-                    >
-                      {tab.toUpperCase()}
-                      {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
-                    </button>
+                    <Fragment key={tab}>
+                      <button
+                        className={`right-pane__tab ${rightTab === tab ? 'right-pane__tab--active' : ''}`}
+                        type="button"
+                        onClick={() => setRightTab(tab)}
+                      >
+                        {tab.toUpperCase()}
+                        {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
+                      </button>
+                      {tab === 'info' ? (
+                        <button
+                          className="right-pane__translate-button"
+                          type="button"
+                          onClick={handleTranslateTabClick}
+                          disabled={isTranslating}
+                        >
+                          {isTranslating ? 'Translating' : showTranslations ? 'Hide' : 'Translate'}
+                        </button>
+                      ) : null}
+                    </Fragment>
                   ))}
                 </div>
 
-                {rightTab === 'subtitle' ? (
-                  <div className="translation-control translation-control--tabs">
-                    <label className="translation-picker">
-                      <span>To</span>
-                      <select value={translationLanguage} onChange={(event) => handleTranslationLanguageChange(event.target.value)}>
-                        {translationLanguages.map((language) => (
-                          <option key={language.value} value={language.value}>
-                            {language.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button className="secondary-button" type="button" onClick={() => (showTranslations ? setShowTranslations(false) : void handleTranslateCaptions())}>
-                      {showTranslations ? 'Hide' : 'Translate'}
-                    </button>
-                    <button className="secondary-button" type="button" onClick={() => void handleTranslateCaptions()} disabled={isTranslating}>
-                      Continue
-                    </button>
-                    <div className="translation-control__status">
-                      <div className="translation-progress" aria-label="Translation progress">
-                        <span
-                          style={{
-                            width: `${translationStatus.total ? Math.round((translationStatus.completed / translationStatus.total) * 100) : 0}%`,
-                          }}
-                        />
-                      </div>
-                      <small>
-                        {translationStatus.completed}/{translationStatus.total || transcript.length}
-                        {translationStatus.failed.length ? ` · ${translationStatus.failed.length} failed` : ''}
-                      </small>
-                      {translationStatus.failed.length ? (
-                        <button className="text-button" type="button" onClick={() => void handleRetryFailedTranslations()} disabled={isTranslating}>
-                          Retry failed
-                        </button>
-                      ) : null}
-                      {translationStatus.lastError ? <small className="translation-control__error">{translationStatus.lastError}</small> : null}
-                    </div>
-                  </div>
-                ) : null}
               </div>
 
               {rightTab === 'info' ? (
@@ -3827,7 +3751,7 @@ function App() {
                       {transcript.map((segment, index) => {
                         const isSelected = selectedSegmentIds.includes(segment.id)
                         const isActive = activeSegmentIndex === index
-                        const translationText = translatedSegments[translationKey(selectedVideo.id, translationLanguage, segment.id)]
+                        const translationText = translatedSegments[translationKey(selectedVideo.id, defaultTranslationLanguage, segment.id)]
 
                         return (
                           <article
