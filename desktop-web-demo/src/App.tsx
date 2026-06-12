@@ -917,6 +917,7 @@ function App() {
   const [chatRecords, setChatRecords] = useState<ChatRecord[]>([])
   const [toast, setToast] = useState<string | null>('Select text inside the transcript to ask AI or attach a note.')
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
+  const [isSelectionGestureActive, setIsSelectionGestureActive] = useState(false)
   const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
   const [isChatContextOpen, setIsChatContextOpen] = useState(false)
   const [guestWorkspace, setGuestWorkspace] = useState<GuestWorkspace | null>(() => loadStoredGuestWorkspace())
@@ -933,6 +934,7 @@ function App() {
   const syncPromptDelayRef = useRef<number | null>(null)
   const selectionReadTimerRef = useRef<number | null>(null)
   const isTouchSelectingRef = useRef(false)
+  const ignoreSelectionChangeUntilRef = useRef(0)
   const lastSavedProgressRef = useRef<Record<string, number>>({})
   const isAutoScrollingRef = useRef(false)
   const isManualTranscriptBrowsingRef = useRef(false)
@@ -1428,23 +1430,31 @@ function App() {
 
   useEffect(() => {
     if (screen !== 'reader') {
+      setIsSelectionGestureActive(false)
       clearNativeSelection()
       return
     }
 
-    function readStableSelection() {
+    function readStableSelection({ clearOnInvalid = false }: { clearOnInvalid?: boolean } = {}) {
+      const rejectSelection = () => {
+        if (clearOnInvalid) {
+          setTranscriptSelection(null)
+        }
+        return false
+      }
+
       const container = transcriptContentRef.current
       const selection = window.getSelection()
 
       if (!container || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        return
+        return rejectSelection()
       }
 
       const anchorNode = selection.anchorNode
       const focusNode = selection.focusNode
 
       if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) {
-        return
+        return rejectSelection()
       }
 
       const range = selection.getRangeAt(0)
@@ -1458,7 +1468,7 @@ function App() {
         .slice(0, 1200)
 
       if (!quote) {
-        return
+        return rejectSelection()
       }
 
       const segmentElements = Array.from(container.querySelectorAll<HTMLElement>('[data-segment-id]'))
@@ -1504,44 +1514,65 @@ function App() {
           current &&
           current.quote === nextSelection.quote &&
           current.timestamp === nextSelection.timestamp &&
-          current.segmentIds.join('|') === nextSelection.segmentIds.join('|') &&
-          Math.abs(current.x - nextSelection.x) < 4 &&
-          Math.abs(current.y - nextSelection.y) < 4
+          current.segmentIds.join('|') === nextSelection.segmentIds.join('|')
         ) {
           return current
         }
 
         return nextSelection
       })
+
+      return true
     }
 
-    function scheduleSelectionRead(delay = 160) {
+    function scheduleSelectionRead(
+      delay = 160,
+      { clearOnInvalid = false, finishTouchGesture = false }: { clearOnInvalid?: boolean; finishTouchGesture?: boolean } = {},
+    ) {
       if (selectionReadTimerRef.current) {
         window.clearTimeout(selectionReadTimerRef.current)
       }
 
       selectionReadTimerRef.current = window.setTimeout(() => {
         selectionReadTimerRef.current = null
-        readStableSelection()
+        readStableSelection({ clearOnInvalid })
+        if (finishTouchGesture) {
+          setIsSelectionGestureActive(false)
+        }
       }, delay)
     }
 
     function handleTouchStart(event: TouchEvent) {
-      isTouchSelectingRef.current = true
       const target = event.target as Node | null
       const transcript = transcriptContentRef.current
-      if (target && transcript?.contains(target)) {
-        setTranscriptSelection(null)
+      const isTranscriptTouch = Boolean(target && transcript?.contains(target))
+
+      isTouchSelectingRef.current = isTranscriptTouch
+      if (isTranscriptTouch) {
+        setIsSelectionGestureActive(true)
+      } else {
+        setIsSelectionGestureActive(false)
       }
     }
 
     function handleTouchEnd() {
+      const wasSelectingTranscript = isTouchSelectingRef.current
       isTouchSelectingRef.current = false
-      scheduleSelectionRead(280)
+      if (!wasSelectingTranscript) {
+        return
+      }
+
+      ignoreSelectionChangeUntilRef.current = Date.now() + 900
+      scheduleSelectionRead(280, { clearOnInvalid: true, finishTouchGesture: true })
+    }
+
+    function handleTouchCancel() {
+      isTouchSelectingRef.current = false
+      setIsSelectionGestureActive(false)
     }
 
     function handleSelectionChange() {
-      if (isTouchSelectingRef.current) {
+      if (isTouchSelectingRef.current || Date.now() < ignoreSelectionChangeUntilRef.current) {
         return
       }
 
@@ -1575,6 +1606,7 @@ function App() {
     document.addEventListener('mouseup', handleMouseUp)
     document.addEventListener('touchstart', handleTouchStart, { passive: true })
     document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('touchcancel', handleTouchCancel)
     document.addEventListener('selectionchange', handleSelectionChange)
     document.addEventListener('keyup', handleKeyUp)
     document.addEventListener('mousedown', clearWhenClickingOutside)
@@ -1584,9 +1616,11 @@ function App() {
         window.clearTimeout(selectionReadTimerRef.current)
         selectionReadTimerRef.current = null
       }
+      setIsSelectionGestureActive(false)
       document.removeEventListener('mouseup', handleMouseUp)
       document.removeEventListener('touchstart', handleTouchStart)
       document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('touchcancel', handleTouchCancel)
       document.removeEventListener('selectionchange', handleSelectionChange)
       document.removeEventListener('keyup', handleKeyUp)
       document.removeEventListener('mousedown', clearWhenClickingOutside)
@@ -1598,6 +1632,7 @@ function App() {
     if (selection) {
       selection.removeAllRanges()
     }
+    setIsSelectionGestureActive(false)
     setTranscriptSelection(null)
   }
 
@@ -3866,7 +3901,7 @@ function App() {
       </section>
 
       <AnimatePresence>
-        {transcriptSelection ? (
+        {transcriptSelection && !isSelectionGestureActive ? (
           <motion.div
             ref={selectionFloatRef}
             className="selection-float"
