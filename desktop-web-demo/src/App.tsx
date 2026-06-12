@@ -1968,15 +1968,86 @@ function App() {
     )
   }
 
-  async function handleImportUrl() {
-    if (!currentUser) {
-      openAuthModal('登录后保存视频到你的学习库，并继续学习进度。', { type: 'save-video' })
+  async function openGuestPreview(youtubeUrl: string, youtubeId?: string) {
+    const normalizedUrl = youtubeUrl.trim()
+    const requestedYoutubeId = youtubeId ?? extractYouTubeId(normalizedUrl)
+
+    if (!normalizedUrl) {
+      setToast('Paste a YouTube URL first.')
       return
     }
 
+    if (
+      guestWorkspace?.temporaryVideo &&
+      requestedYoutubeId &&
+      guestWorkspace.temporaryVideo.youtubeId !== requestedYoutubeId
+    ) {
+      openAuthModal('游客一次只能临时解析 1 个视频。登录后可以保存更多视频并继续学习。', { type: 'save-video' })
+      return
+    }
+
+    setIsImporting(true)
+    setToast('Opening a temporary video...')
+
+    try {
+      const preview = await postContractJson<PreviewResponse>('/api/youtube/preview', {
+        youtubeUrl: normalizedUrl,
+        youtubeId: requestedYoutubeId,
+      })
+
+      if (
+        guestWorkspace?.temporaryVideo &&
+        guestWorkspace.temporaryVideo.youtubeId !== preview.video.youtubeId
+      ) {
+        openAuthModal('游客一次只能临时解析 1 个视频。登录后可以保存更多视频并继续学习。', { type: 'save-video' })
+        return
+      }
+
+      const temporaryVideo = contractVideoToDemoVideo(preview.video, preview.transcript)
+      const workspace: GuestWorkspace = {
+        temporaryVideo: preview.video,
+        transcript: preview.transcript,
+        temporaryChatRecords: guestWorkspace?.temporaryChatRecords ?? [],
+        temporaryNotes: guestWorkspace?.temporaryNotes ?? [],
+        askCount: guestWorkspace?.askCount ?? 0,
+        playedSeconds: guestWorkspace?.playedSeconds ?? 0,
+        hasStartedWatching: guestWorkspace?.hasStartedWatching ?? false,
+        hasAskedAI: guestWorkspace?.hasAskedAI ?? false,
+        hasTemporaryNotes: guestWorkspace?.hasTemporaryNotes ?? false,
+        createdAt: guestWorkspace?.createdAt ?? new Date().toISOString(),
+        pendingAction: guestWorkspace?.pendingAction ?? null,
+      }
+
+      setGuestWorkspace(workspace)
+      setVideos((current) => [temporaryVideo, ...current.filter((video) => video.id !== temporaryVideo.id)])
+      setVideoMeta((current) => ({
+        ...current,
+        [temporaryVideo.id]: videoMetaFromVideo(temporaryVideo),
+      }))
+      setSelectedVideoId(temporaryVideo.id)
+      setCurrentPosition(preview.transcript[0]?.startSec ?? 0)
+      setRightTab(preview.transcript.length ? 'subtitle' : 'info')
+      setScreen('reader')
+      setPreviewDiscoverId(null)
+      setShowAddModal(false)
+      setToast('Temporary video opened.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to preview this video.'
+      setToast(message)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  async function handleImportUrl() {
     const url = linkInput.trim()
     if (!url) {
       setToast('Paste a YouTube URL first.')
+      return
+    }
+
+    if (!currentUser) {
+      await openGuestPreview(url, extractYouTubeId(url))
       return
     }
 
@@ -2104,50 +2175,7 @@ function App() {
     const item = findDiscoverItem(discoverId)
     if (!item) return
 
-    if (guestWorkspace?.temporaryVideo && guestWorkspace.temporaryVideo.youtubeId !== item.youtubeId) {
-      openAuthModal('游客一次只能临时解析 1 个视频。登录后可以保存更多视频并继续学习。', { type: 'save-video' })
-      return
-    }
-
-    setIsImporting(true)
-    try {
-      const preview = await postContractJson<PreviewResponse>('/api/youtube/preview', {
-        youtubeUrl: item.youtubeUrl,
-        youtubeId: item.youtubeId,
-      })
-
-      const workspace: GuestWorkspace = {
-        temporaryVideo: preview.video,
-        transcript: preview.transcript,
-        temporaryChatRecords: guestWorkspace?.temporaryChatRecords ?? [],
-        temporaryNotes: guestWorkspace?.temporaryNotes ?? [],
-        askCount: guestWorkspace?.askCount ?? 0,
-        playedSeconds: guestWorkspace?.playedSeconds ?? 0,
-        hasStartedWatching: guestWorkspace?.hasStartedWatching ?? false,
-        hasAskedAI: guestWorkspace?.hasAskedAI ?? false,
-        hasTemporaryNotes: guestWorkspace?.hasTemporaryNotes ?? false,
-        createdAt: guestWorkspace?.createdAt ?? new Date().toISOString(),
-        pendingAction: guestWorkspace?.pendingAction ?? null,
-      }
-      const temporaryVideo = contractVideoToDemoVideo(preview.video, preview.transcript)
-      setGuestWorkspace(workspace)
-      setVideos((current) => [temporaryVideo, ...current.filter((video) => video.id !== temporaryVideo.id)])
-      setVideoMeta((current) => ({
-        ...current,
-        [temporaryVideo.id]: videoMetaFromVideo(temporaryVideo),
-      }))
-      setSelectedVideoId(temporaryVideo.id)
-      setCurrentPosition(preview.transcript[0]?.startSec ?? 0)
-      setRightTab(preview.transcript.length ? 'subtitle' : 'info')
-      setScreen('reader')
-      setPreviewDiscoverId(null)
-      setToast('Temporary video opened.')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to preview this video.'
-      setToast(message)
-    } finally {
-      setIsImporting(false)
-    }
+    await openGuestPreview(item.youtubeUrl, item.youtubeId)
   }
 
   async function sendChatQuestion(
