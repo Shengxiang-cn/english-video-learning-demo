@@ -3565,7 +3565,7 @@ function App() {
                       </button>
                       {tab === 'info' ? (
                         <button
-                          className="right-pane__translate-button"
+                          className="right-pane__tab right-pane__translate-button"
                           type="button"
                           onClick={handleTranslateTabClick}
                           disabled={isTranslating}
