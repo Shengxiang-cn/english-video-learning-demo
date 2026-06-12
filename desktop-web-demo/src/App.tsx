@@ -931,6 +931,8 @@ function App() {
   const autoScrollResetRef = useRef<number | null>(null)
   const manualScrollResetRef = useRef<number | null>(null)
   const syncPromptDelayRef = useRef<number | null>(null)
+  const selectionReadTimerRef = useRef<number | null>(null)
+  const isTouchSelectingRef = useRef(false)
   const lastSavedProgressRef = useRef<Record<string, number>>({})
   const isAutoScrollingRef = useRef(false)
   const isManualTranscriptBrowsingRef = useRef(false)
@@ -1487,7 +1489,7 @@ function App() {
       }
       y = Math.min(Math.max(y, viewportPadding), window.innerHeight - estimatedFloatHeight - viewportPadding)
 
-      setTranscriptSelection({
+      const nextSelection = {
         quote,
         timestamp: firstSegment ? formatTime(firstSegment.startSec) : formatTime(selectedVideo.lastPositionSec),
         startSec: selectedSegments[0]?.startSec ?? firstSegment?.startSec ?? selectedVideo.lastPositionSec,
@@ -1495,11 +1497,63 @@ function App() {
         segmentIds,
         x,
         y,
+      }
+
+      setTranscriptSelection((current) => {
+        if (
+          current &&
+          current.quote === nextSelection.quote &&
+          current.timestamp === nextSelection.timestamp &&
+          current.segmentIds.join('|') === nextSelection.segmentIds.join('|') &&
+          Math.abs(current.x - nextSelection.x) < 4 &&
+          Math.abs(current.y - nextSelection.y) < 4
+        ) {
+          return current
+        }
+
+        return nextSelection
       })
     }
 
-    function scheduleSelectionRead() {
-      window.setTimeout(readStableSelection, 120)
+    function scheduleSelectionRead(delay = 160) {
+      if (selectionReadTimerRef.current) {
+        window.clearTimeout(selectionReadTimerRef.current)
+      }
+
+      selectionReadTimerRef.current = window.setTimeout(() => {
+        selectionReadTimerRef.current = null
+        readStableSelection()
+      }, delay)
+    }
+
+    function handleTouchStart(event: TouchEvent) {
+      isTouchSelectingRef.current = true
+      const target = event.target as Node | null
+      const transcript = transcriptContentRef.current
+      if (target && transcript?.contains(target)) {
+        setTranscriptSelection(null)
+      }
+    }
+
+    function handleTouchEnd() {
+      isTouchSelectingRef.current = false
+      scheduleSelectionRead(280)
+    }
+
+    function handleSelectionChange() {
+      if (isTouchSelectingRef.current) {
+        return
+      }
+
+      scheduleSelectionRead(180)
+    }
+
+    function handleMouseUp() {
+      scheduleSelectionRead(120)
+    }
+
+    function handleKeyUp() {
+      scheduleSelectionRead(120)
     }
 
     function clearWhenClickingOutside(event: MouseEvent) {
@@ -1518,17 +1572,23 @@ function App() {
       clearNativeSelection()
     }
 
-    document.addEventListener('mouseup', scheduleSelectionRead)
-    document.addEventListener('touchend', scheduleSelectionRead)
-    document.addEventListener('selectionchange', scheduleSelectionRead)
-    document.addEventListener('keyup', scheduleSelectionRead)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('selectionchange', handleSelectionChange)
+    document.addEventListener('keyup', handleKeyUp)
     document.addEventListener('mousedown', clearWhenClickingOutside)
 
     return () => {
-      document.removeEventListener('mouseup', scheduleSelectionRead)
-      document.removeEventListener('touchend', scheduleSelectionRead)
-      document.removeEventListener('selectionchange', scheduleSelectionRead)
-      document.removeEventListener('keyup', scheduleSelectionRead)
+      if (selectionReadTimerRef.current) {
+        window.clearTimeout(selectionReadTimerRef.current)
+        selectionReadTimerRef.current = null
+      }
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('touchstart', handleTouchStart)
+      document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('selectionchange', handleSelectionChange)
+      document.removeEventListener('keyup', handleKeyUp)
       document.removeEventListener('mousedown', clearWhenClickingOutside)
     }
   }, [screen, selectedVideo.lastPositionSec, transcript])

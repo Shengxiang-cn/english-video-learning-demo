@@ -3692,15 +3692,35 @@
     position: sticky;
     top: 0;
     z-index: 42;
-    height: auto;
-    min-height: 58px;
-    padding: 10px 12px;
-    gap: 10px;
+    flex: 0 0 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 6px 10px;
+    gap: 8px;
   }
 
   .reader-topbar__brand {
-    font-size: 1.16rem;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    font-size: 1rem;
+    line-height: 1;
     letter-spacing: 0;
+  }
+
+  .reader-topbar__brand span {
+    display: inline-block;
+  }
+
+  .reader-topbar .reader-signin-button {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 0.82rem;
+  }
+
+  .reader-topbar .reader-account-button {
+    width: 36px;
+    height: 36px;
   }
 
   .reader-temp-status {
@@ -3713,8 +3733,8 @@
     height: auto;
     min-height: 0;
     flex-direction: column;
-    gap: 12px;
-    padding: 12px;
+    gap: 8px;
+    padding: 8px;
   }
 
   .desktop-app--reader .reader-main,
@@ -3726,22 +3746,32 @@
   }
 
   .desktop-app--reader .reader-scroll {
-    gap: 12px;
+    gap: 8px;
   }
 
-  .study-player-card,
+  .study-player-card {
+    gap: 8px;
+    border-radius: 14px;
+    padding: 10px;
+  }
+
   .study-goal-card {
-    border-radius: 16px;
-    padding: 14px;
+    border-radius: 14px;
+    padding: 10px;
   }
 
   .study-player-card__header {
     flex-direction: column;
-    gap: 10px;
+    gap: 4px;
   }
 
   .study-player-card__header h2 {
-    font-size: 1rem;
+    font-size: 0.92rem;
+    line-height: 1.2;
+  }
+
+  .study-player-card__header p {
+    display: none;
   }
 
   .study-player-card__header .secondary-button {
@@ -3754,7 +3784,12 @@
 
   .study-player-progress {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 6px;
+    font-size: 0.76rem;
+  }
+
+  .study-player-progress > div {
+    height: 4px;
   }
 
   .study-goal-card blockquote {
@@ -3764,27 +3799,41 @@
 
   .desktop-app--reader .right-pane {
     width: 100%;
-    border-radius: 18px;
+    border-radius: 14px;
   }
 
   .desktop-app--reader .right-pane__tabs {
-    top: 58px;
-    padding: 12px;
-    border-radius: 18px 18px 0 0;
+    top: 44px;
+    padding: 8px 10px 7px;
+    border-radius: 14px 14px 0 0;
   }
 
   .right-pane__tab-list {
-    justify-content: flex-start;
-    overflow-x: auto;
+    justify-content: space-between;
+    gap: 2px;
+    overflow: visible;
   }
 
-  .right-pane__tab {
-    flex: 0 0 auto;
-    min-width: 78px;
+  .desktop-app--reader .right-pane__tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 1px 8px;
+    font-size: 0.62rem;
+    line-height: 1.1;
+    letter-spacing: 0;
   }
 
-  .translation-control--tabs {
-    flex-wrap: wrap;
+  .right-pane__tab span {
+    min-width: 18px;
+    height: 18px;
+    margin-left: 3px;
+    padding: 0 5px;
+    border-radius: 7px;
+    font-size: 0.68rem;
+  }
+
+  .right-pane__translate-button {
+    white-space: nowrap;
   }
 
   .desktop-app--reader .detail-panel,
@@ -3793,7 +3842,7 @@
     height: auto;
     min-height: 0;
     overflow: visible;
-    padding: 16px;
+    padding: 10px 12px;
   }
 
   .desktop-app--reader .detail-panel--subtitle .reader-text {
@@ -3813,19 +3862,29 @@
     padding-right: 0;
   }
 
-  .reader-line {
-    grid-template-columns: 1fr;
-    gap: 4px;
-    padding: 12px 0;
+  .desktop-app--reader .reader-line {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    padding: 6px 0;
   }
 
   .desktop-app--reader .reader-line__body {
-    font-size: 1rem;
-    line-height: 1.65;
+    font-size: 0.86rem;
+    line-height: 1.45;
   }
 
-  .reader-line__time {
+  .desktop-app--reader .reader-line__time {
     padding-top: 0;
+    font-size: 0.68rem;
+  }
+
+  .panel-kicker--subtitle {
+    margin: 0 0 8px;
+    font-size: 0.78rem;
+  }
+
+  .desktop-app--reader .reader-line--selected .reader-line__body {
+    padding-left: 7px;
   }
 
   .chat-composer-section {
@@ -3907,7 +3966,16 @@
   }
 
   .selection-float {
+    gap: 6px;
     max-width: calc(100vw - 24px);
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .selection-float button {
+    min-height: 36px;
+    padding: 7px 9px;
+    font-size: 0.82rem;
   }
 
   .toast {
