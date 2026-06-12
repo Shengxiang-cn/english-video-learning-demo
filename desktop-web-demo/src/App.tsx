@@ -1380,6 +1380,10 @@ function App() {
         nextY += viewportPadding - rect.top
       }
 
+      if (rect.bottom > window.innerHeight - viewportPadding) {
+        nextY -= rect.bottom - (window.innerHeight - viewportPadding)
+      }
+
       if (Math.abs(nextX - transcriptSelection.x) > 1 || Math.abs(nextY - transcriptSelection.y) > 1) {
         setTranscriptSelection((current) => current ? { ...current, x: nextX, y: nextY } : current)
       }
@@ -1396,6 +1400,7 @@ function App() {
       const rect = element.getBoundingClientRect()
       const viewportPadding = 14
       let deltaX = 0
+      let deltaY = 0
 
       if (rect.right > window.innerWidth - viewportPadding) {
         deltaX = window.innerWidth - viewportPadding - rect.right
@@ -1403,8 +1408,14 @@ function App() {
         deltaX = viewportPadding - rect.left
       }
 
-      if (deltaX) {
-        setTranscriptSelection((current) => current ? { ...current, x: current.x + deltaX } : current)
+      if (rect.bottom > window.innerHeight - viewportPadding) {
+        deltaY = window.innerHeight - viewportPadding - rect.bottom
+      } else if (rect.top < viewportPadding) {
+        deltaY = viewportPadding - rect.top
+      }
+
+      if (deltaX || deltaY) {
+        setTranscriptSelection((current) => current ? { ...current, x: current.x + deltaX, y: current.y + deltaY } : current)
       }
     }
 
@@ -1463,6 +1474,18 @@ function App() {
       const firstSegment = transcript.find((segment) => segmentIds.includes(segment.id))
       const selectedSegments = transcript.filter((segment) => segmentIds.includes(segment.id))
       const rect = range.getBoundingClientRect()
+      const viewportPadding = 14
+      const estimatedFloatWidth = Math.min(window.innerWidth - viewportPadding * 2, 360)
+      const estimatedFloatHeight = 62
+      const selectionCenter = rect.left + rect.width / 2
+      let x = selectionCenter - estimatedFloatWidth / 2
+      let y = rect.top - estimatedFloatHeight - 12
+
+      x = Math.min(Math.max(x, viewportPadding), window.innerWidth - estimatedFloatWidth - viewportPadding)
+      if (y < viewportPadding) {
+        y = rect.bottom + 12
+      }
+      y = Math.min(Math.max(y, viewportPadding), window.innerHeight - estimatedFloatHeight - viewportPadding)
 
       setTranscriptSelection({
         quote,
@@ -1470,13 +1493,13 @@ function App() {
         startSec: selectedSegments[0]?.startSec ?? firstSegment?.startSec ?? selectedVideo.lastPositionSec,
         endSec: selectedSegments[selectedSegments.length - 1]?.endSec ?? firstSegment?.endSec ?? selectedVideo.lastPositionSec,
         segmentIds,
-        x: Math.min(Math.max(rect.left + rect.width / 2, 120), window.innerWidth - 120),
-        y: Math.max(rect.top - 18, 96),
+        x,
+        y,
       })
     }
 
     function scheduleSelectionRead() {
-      window.setTimeout(readStableSelection, 80)
+      window.setTimeout(readStableSelection, 120)
     }
 
     function clearWhenClickingOutside(event: MouseEvent) {
@@ -1497,12 +1520,14 @@ function App() {
 
     document.addEventListener('mouseup', scheduleSelectionRead)
     document.addEventListener('touchend', scheduleSelectionRead)
+    document.addEventListener('selectionchange', scheduleSelectionRead)
     document.addEventListener('keyup', scheduleSelectionRead)
     document.addEventListener('mousedown', clearWhenClickingOutside)
 
     return () => {
       document.removeEventListener('mouseup', scheduleSelectionRead)
       document.removeEventListener('touchend', scheduleSelectionRead)
+      document.removeEventListener('selectionchange', scheduleSelectionRead)
       document.removeEventListener('keyup', scheduleSelectionRead)
       document.removeEventListener('mousedown', clearWhenClickingOutside)
     }
