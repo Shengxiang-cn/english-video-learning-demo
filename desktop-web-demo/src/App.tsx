@@ -3542,11 +3542,6 @@ function App() {
                   </div>
                 </article>
 
-                <section className="study-goal-card">
-                  <p>每日金句</p>
-                  <blockquote>Learning never exhausts the mind.</blockquote>
-                  <cite>Leonardo da Vinci</cite>
-                </section>
               </div>
             </section>
 
