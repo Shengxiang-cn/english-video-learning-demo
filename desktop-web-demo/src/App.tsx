@@ -426,6 +426,21 @@ const discoveryItems: DiscoveryItem[] = [
     reason: '运营精选：适合理解 agentic loop 的真实使用方式，以及什么时候人类参与的循环仍然更有效。',
     learnBullets: ['理解 AI agent loop 的核心概念', '积累代码审查和自动化工作流表达', '整理人机协作边界相关笔记'],
   },
+  {
+    id: 'lex-fridman-openclaw-agent',
+    youtubeId: 'YFjfBk8HI5o',
+    youtubeUrl: 'https://www.youtube.com/watch?v=YFjfBk8HI5o&t=3205s',
+    title: 'OpenClaw: The Viral AI Agent that Broke the Internet - Peter Steinberger',
+    channel: 'Lex Fridman',
+    duration: '3:15:52',
+    durationSec: 11752,
+    thumbnailUrl: 'https://img.youtube.com/vi/YFjfBk8HI5o/maxresdefault.jpg',
+    difficulty: 'Advanced',
+    category: 'AI Agent',
+    tags: ['AI Agent', 'Research'],
+    reason: '运营精选：适合理解 OpenClaw、AI agent 框架、工具调用循环和自主软件工程的真实边界。',
+    learnBullets: ['理解 AI agent 框架的工程细节', '积累自主工具调用和浏览器操作表达', '整理长访谈中的技术判断'],
+  },
 ]
 
 const commonTags = ['Product', 'English', 'Design', 'Startup', 'AI Agent', 'Research']
