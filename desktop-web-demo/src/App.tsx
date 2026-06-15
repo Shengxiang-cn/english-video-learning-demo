@@ -318,7 +318,24 @@ const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Vi
   { label: 'Notes', screen: 'notes', icon: StickyNote },
 ]
 
-const discoveryItems = [
+type DiscoveryItem = {
+  id: string
+  youtubeId: string
+  youtubeUrl: string
+  title: string
+  channel: string
+  duration: string
+  durationSec: number
+  thumbnailUrl: string
+  difficulty: string
+  category: string
+  tags: string[]
+  transcriptLanguage?: string
+  reason: string
+  learnBullets: string[]
+}
+
+const discoveryItems: DiscoveryItem[] = [
   {
     id: 'karpathy-llm-deep-dive',
     youtubeId: '7xTGNNLPyMI',
@@ -393,38 +410,6 @@ const discoveryItems = [
     tags: ['Product', 'AI Agent'],
     reason: '运营精选：适合学习 Anthropic 的 AI 产品节奏、Claude Code 产品方法，以及 AI 公司里的 PM 能力变化。',
     learnBullets: ['理解 AI 产品团队如何提速', '保存 Claude Code 和 Cowork 相关表达', '沉淀产品发布和反馈机制笔记'],
-  },
-  {
-    id: 'yao-shunyu-ai-heroism-over',
-    youtubeId: 'ttkd0t5qTD4',
-    youtubeUrl: 'https://www.youtube.com/watch?v=ttkd0t5qTD4',
-    title: 'Yao Shunyu: Let Me Go a Little Crazy! Training Models at Anthropic & Gemini, Heroism Is Over',
-    channel: 'Zhang Xiaojun Podcast',
-    duration: '3:34:39',
-    durationSec: 12879,
-    thumbnailUrl: 'https://img.youtube.com/vi/ttkd0t5qTD4/maxresdefault.jpg',
-    difficulty: 'Advanced',
-    category: 'AI Research',
-    tags: ['Research', 'AI Agent'],
-    transcriptLanguage: 'zh',
-    reason: '运营精选：适合深入理解大模型训练、AI 研究组织方式，以及从个人英雄主义到工程化生产的变化。',
-    learnBullets: ['理解模型训练和研究流程', '积累 AI 研究相关表达', '整理长访谈中的关键观点'],
-  },
-  {
-    id: 'crossroads-li-xiang-ai-era',
-    youtubeId: 'Zsu1mBMet9k',
-    youtubeUrl: 'https://www.youtube.com/watch?v=Zsu1mBMet9k',
-    title: "CrossRoads Ep.27: Li Xiang: Li's Ideal - AI to Give Everyone a Billionaire's Life",
-    channel: '罗永浩的十字路口',
-    duration: '3:36:19',
-    durationSec: 12979,
-    thumbnailUrl: 'https://img.youtube.com/vi/Zsu1mBMet9k/maxresdefault.jpg',
-    difficulty: 'Advanced',
-    category: 'AI Business',
-    tags: ['Product', 'Startup'],
-    transcriptLanguage: 'zh',
-    reason: '运营精选：适合理解理想汽车从智能汽车走向 AI 与具身智能公司的战略思考。',
-    learnBullets: ['理解 AI 与汽车产业变化', '保存商业战略和产品表达', '沉淀中文长访谈中的关键判断'],
   },
 ]
 
