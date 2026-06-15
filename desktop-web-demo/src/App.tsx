@@ -411,6 +411,21 @@ const discoveryItems: DiscoveryItem[] = [
     reason: '运营精选：适合学习 Anthropic 的 AI 产品节奏、Claude Code 产品方法，以及 AI 公司里的 PM 能力变化。',
     learnBullets: ['理解 AI 产品团队如何提速', '保存 Claude Code 和 Cowork 相关表达', '沉淀产品发布和反馈机制笔记'],
   },
+  {
+    id: 'greg-isenberg-ai-agent-loop',
+    youtubeId: '7clJ8IH784Q',
+    youtubeUrl: 'https://www.youtube.com/watch?v=7clJ8IH784Q',
+    title: 'WTF Is an "AI Agent Loop"? Genius or Hype?',
+    channel: 'Greg Isenberg',
+    duration: '22:32',
+    durationSec: 1352,
+    thumbnailUrl: 'https://img.youtube.com/vi/7clJ8IH784Q/maxresdefault.jpg',
+    difficulty: 'Intermediate',
+    category: 'AI Workflow',
+    tags: ['AI Agent', 'Product'],
+    reason: '运营精选：适合理解 agentic loop 的真实使用方式，以及什么时候人类参与的循环仍然更有效。',
+    learnBullets: ['理解 AI agent loop 的核心概念', '积累代码审查和自动化工作流表达', '整理人机协作边界相关笔记'],
+  },
 ]
 
 const commonTags = ['Product', 'English', 'Design', 'Startup', 'AI Agent', 'Research']
