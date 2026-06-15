@@ -825,8 +825,8 @@ async function fetchOembed(url) {
   return fallback.json()
 }
 
-async function fetchTranscript(youtubeId) {
-  return fetchYouTubeTranscript(youtubeId, { language: 'en' }).catch((error) => ({
+async function fetchTranscript(youtubeId, language = 'en') {
+  return fetchYouTubeTranscript(youtubeId, { language }).catch((error) => ({
     segments: [],
     language: null,
     availableLanguages: [],
@@ -852,9 +852,10 @@ async function parseYouTubeForLearning(body) {
   }
 
   const canonicalUrl = `https://www.youtube.com/watch?v=${youtubeId}`
+  const transcriptLanguage = String(body?.transcriptLanguage ?? body?.transcript_language ?? body?.language ?? 'en').trim() || 'en'
   const [metadata, transcriptResult] = await Promise.all([
     fetchOembed(canonicalUrl),
-    fetchTranscript(youtubeId),
+    fetchTranscript(youtubeId, transcriptLanguage),
   ])
 
   const transcript = normalizeTranscript(transcriptResult.segments ?? [])

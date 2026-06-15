@@ -70,6 +70,10 @@ type ContractVideo = {
   status?: InboxTab
   isFavourite?: boolean
   tags?: string[]
+  transcriptLanguage?: string | null
+  transcriptSource?: string | null
+  transcriptLanguages?: string[]
+  transcriptError?: unknown
   lastPositionSec?: number
   lastWatchedAt?: string | null
   savedAt?: string
@@ -402,6 +406,7 @@ const discoveryItems = [
     difficulty: 'Advanced',
     category: 'AI Research',
     tags: ['Research', 'AI Agent'],
+    transcriptLanguage: 'zh',
     reason: '运营精选：适合深入理解大模型训练、AI 研究组织方式，以及从个人英雄主义到工程化生产的变化。',
     learnBullets: ['理解模型训练和研究流程', '积累 AI 研究相关表达', '整理长访谈中的关键观点'],
   },
@@ -417,6 +422,7 @@ const discoveryItems = [
     difficulty: 'Advanced',
     category: 'AI Business',
     tags: ['Product', 'Startup'],
+    transcriptLanguage: 'zh',
     reason: '运营精选：适合理解理想汽车从智能汽车走向 AI 与具身智能公司的战略思考。',
     learnBullets: ['理解 AI 与汽车产业变化', '保存商业战略和产品表达', '沉淀中文长访谈中的关键判断'],
   },
@@ -726,6 +732,10 @@ function videoToRow(video: DemoVideo, userId: string, meta: VideoMeta = videoMet
     cover_eyebrow: video.coverEyebrow,
     cover_title: video.coverTitle,
     cover_detail: video.coverDetail,
+    transcript_language: video.transcriptLanguage ?? null,
+    transcript_source: video.transcriptSource ?? null,
+    transcript_languages: video.transcriptLanguages ?? [],
+    transcript_error: video.transcriptError ?? null,
     transcript: video.transcript ?? [],
     status: meta.status,
     is_favourite: meta.isFavourite,
@@ -756,6 +766,10 @@ function rowToVideo(row: LearningVideoRow): DemoVideo {
     status: normalizedStatus(row.status, row.last_position_sec > 0 ? 'learning' : 'inbox'),
     isFavourite: Boolean(row.is_favourite),
     tags: stringArray(row.tags),
+    transcriptLanguage: row.transcript_language ?? null,
+    transcriptSource: row.transcript_source ?? null,
+    transcriptLanguages: stringArray(row.transcript_languages),
+    transcriptError: row.transcript_error ?? null,
     transcript: row.transcript ?? [],
     savedAt: row.saved_at,
   }
@@ -876,6 +890,10 @@ function contractVideoToDemoVideo(video: ContractVideo, transcript: DemoVideo['t
     status: video.status ?? 'inbox',
     isFavourite: Boolean(video.isFavourite),
     tags: video.tags ?? [],
+    transcriptLanguage: video.transcriptLanguage ?? null,
+    transcriptSource: video.transcriptSource ?? null,
+    transcriptLanguages: video.transcriptLanguages ?? [],
+    transcriptError: video.transcriptError ?? null,
     savedAt: video.savedAt,
     transcript,
   }
@@ -2144,7 +2162,11 @@ function App() {
     )
   }
 
-  async function openGuestPreview(youtubeUrl: string, youtubeId?: string, options: { durationSec?: number } = {}) {
+  async function openGuestPreview(
+    youtubeUrl: string,
+    youtubeId?: string,
+    options: { durationSec?: number; transcriptLanguage?: string } = {},
+  ) {
     const normalizedUrl = youtubeUrl.trim()
     const requestedYoutubeId = youtubeId ?? extractYouTubeId(normalizedUrl)
 
@@ -2170,6 +2192,7 @@ function App() {
         youtubeUrl: normalizedUrl,
         youtubeId: requestedYoutubeId,
         durationSec: options.durationSec,
+        transcriptLanguage: options.transcriptLanguage,
       })
 
       if (
@@ -2295,6 +2318,8 @@ function App() {
     const data = await postContractJson<ImportResponse>('/api/youtube/import', {
       youtubeUrl: item.youtubeUrl,
       youtubeId: item.youtubeId,
+      durationSec: item.durationSec,
+      transcriptLanguage: 'transcriptLanguage' in item ? item.transcriptLanguage : undefined,
       status,
       forceReopen,
     }, accessToken)
@@ -2322,8 +2347,12 @@ function App() {
   }
 
   async function startLearningFromDiscover(discoverId: string) {
+    const item = findDiscoverItem(discoverId)
     const existing = findSavedDiscoveryVideo(discoverId)
-    if (existing && (videoMeta[existing.id]?.status === 'learning' || videoMeta[existing.id]?.status === 'done')) {
+    const preferredLanguage = item && 'transcriptLanguage' in item ? item.transcriptLanguage : undefined
+    const hasPreferredTranscript = !preferredLanguage || existing?.transcriptLanguage?.startsWith(preferredLanguage)
+
+    if (existing && hasPreferredTranscript && (videoMeta[existing.id]?.status === 'learning' || videoMeta[existing.id]?.status === 'done')) {
       openReader(existing.id)
       setPreviewDiscoverId(null)
       return
@@ -2331,7 +2360,7 @@ function App() {
 
     setIsImporting(true)
     try {
-      const importedVideo = await importDiscoverVideo(discoverId, 'learning')
+      const importedVideo = await importDiscoverVideo(discoverId, 'learning', Boolean(existing && !hasPreferredTranscript))
       setVideos((current) => [importedVideo, ...current.filter((video) => video.id !== importedVideo.id)])
       setVideoMeta((current) => ({
         ...current,
@@ -2352,7 +2381,10 @@ function App() {
     const item = findDiscoverItem(discoverId)
     if (!item) return
 
-    await openGuestPreview(item.youtubeUrl, item.youtubeId, { durationSec: item.durationSec })
+    await openGuestPreview(item.youtubeUrl, item.youtubeId, {
+      durationSec: item.durationSec,
+      transcriptLanguage: 'transcriptLanguage' in item ? item.transcriptLanguage : undefined,
+    })
   }
 
   async function sendChatQuestion(

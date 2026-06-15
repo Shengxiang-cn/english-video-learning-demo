@@ -28,6 +28,10 @@ export type DemoVideo = {
   isFavourite?: boolean
   tags?: string[]
   savedAt?: string
+  transcriptLanguage?: string | null
+  transcriptSource?: string | null
+  transcriptLanguages?: string[]
+  transcriptError?: unknown
   transcript: TranscriptSegment[]
 }
 
