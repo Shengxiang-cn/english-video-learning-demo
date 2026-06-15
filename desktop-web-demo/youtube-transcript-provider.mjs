@@ -402,9 +402,19 @@ export async function fetchYouTubeTranscript(videoId, options = {}) {
   }
 
   if (process.env.SUPADATA_API_KEY) {
+    const supadataLanguages = [...new Set([options.language ?? 'en', null])]
     try {
-      const supadataResult = await fetchSupadataTranscript(videoId, options.language ?? 'en')
-      if (supadataResult) return supadataResult
+      for (const language of supadataLanguages) {
+        try {
+          const supadataResult = await fetchSupadataTranscript(videoId, language)
+          if (supadataResult) return supadataResult
+        } catch (error) {
+          lastError = error
+          console.warn(
+            `[youtube-transcript] Supadata${language ? ` (${language})` : ' (auto)'} failed for ${videoId}: ${error.code ?? 'UNKNOWN'} ${error.message}`,
+          )
+        }
+      }
     } catch (error) {
       lastError = error
       console.warn(`[youtube-transcript] Supadata failed for ${videoId}: ${error.code ?? 'UNKNOWN'} ${error.message}`)

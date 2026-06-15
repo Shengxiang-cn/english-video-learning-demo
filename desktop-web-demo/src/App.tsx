@@ -2144,7 +2144,7 @@ function App() {
     )
   }
 
-  async function openGuestPreview(youtubeUrl: string, youtubeId?: string) {
+  async function openGuestPreview(youtubeUrl: string, youtubeId?: string, options: { durationSec?: number } = {}) {
     const normalizedUrl = youtubeUrl.trim()
     const requestedYoutubeId = youtubeId ?? extractYouTubeId(normalizedUrl)
 
@@ -2169,6 +2169,7 @@ function App() {
       const preview = await postContractJson<PreviewResponse>('/api/youtube/preview', {
         youtubeUrl: normalizedUrl,
         youtubeId: requestedYoutubeId,
+        durationSec: options.durationSec,
       })
 
       if (
@@ -2351,7 +2352,7 @@ function App() {
     const item = findDiscoverItem(discoverId)
     if (!item) return
 
-    await openGuestPreview(item.youtubeUrl, item.youtubeId)
+    await openGuestPreview(item.youtubeUrl, item.youtubeId, { durationSec: item.durationSec })
   }
 
   async function sendChatQuestion(

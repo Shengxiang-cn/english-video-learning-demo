@@ -858,7 +858,8 @@ async function parseYouTubeForLearning(body) {
   ])
 
   const transcript = normalizeTranscript(transcriptResult.segments ?? [])
-  const durationSec = Math.max(transcript[transcript.length - 1]?.endSec ?? 0, 300)
+  const requestedDurationSec = Math.round(Number(body?.durationSec ?? body?.duration_sec) || 0)
+  const durationSec = Math.max(transcript[transcript.length - 1]?.endSec ?? 0, requestedDurationSec, 300)
   const thumbnailUrl = `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
 
   return {
