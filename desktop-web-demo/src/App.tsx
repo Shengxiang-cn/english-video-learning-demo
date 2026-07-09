@@ -1026,6 +1026,9 @@ function App() {
   const manualScrollResetRef = useRef<number | null>(null)
   const syncPromptDelayRef = useRef<number | null>(null)
   const selectionReadTimerRef = useRef<number | null>(null)
+  const progressSaveTimerRef = useRef<number | null>(null)
+  const currentPositionRef = useRef(currentPosition)
+  const selectedVideoIdRef = useRef(selectedVideoId)
   const isTouchSelectingRef = useRef(false)
   const ignoreSelectionChangeUntilRef = useRef(0)
   const lastSavedProgressRef = useRef<Record<string, number>>({})
@@ -1308,6 +1311,9 @@ function App() {
       if (syncPromptDelayRef.current) {
         window.clearTimeout(syncPromptDelayRef.current)
       }
+      if (progressSaveTimerRef.current) {
+        window.clearTimeout(progressSaveTimerRef.current)
+      }
     }
   }, [])
 
@@ -1361,6 +1367,11 @@ function App() {
   }, [screen, selectedVideo.youtubeId])
 
   useEffect(() => {
+    currentPositionRef.current = currentPosition
+    selectedVideoIdRef.current = selectedVideoId
+  }, [currentPosition, selectedVideoId])
+
+  useEffect(() => {
     if (!currentUser || !supabase || screen !== 'reader' || selectedVideo.sourceType !== 'youtube') {
       return
     }
@@ -1371,9 +1382,20 @@ function App() {
       return
     }
 
-    const timer = window.setTimeout(async () => {
+    if (progressSaveTimerRef.current) {
+      return
+    }
+
+    progressSaveTimerRef.current = window.setTimeout(async () => {
+      progressSaveTimerRef.current = null
       try {
-        const safePosition = Math.max(0, Math.round(currentPosition))
+        const latestPosition = selectedVideoIdRef.current === selectedVideo.id ? currentPositionRef.current : currentPosition
+        const safePosition = Math.max(0, Math.round(latestPosition))
+        const lastPersistedPosition = lastSavedProgressRef.current[selectedVideo.id] ?? selectedVideo.lastPositionSec ?? 0
+        if (Math.abs(safePosition - lastPersistedPosition) < 10) {
+          return
+        }
+
         const nextVideo: DemoVideo = {
           ...selectedVideo,
           lastPositionSec: safePosition,
@@ -1409,8 +1431,6 @@ function App() {
         setToast('Failed to save video progress.')
       }
     }, 900)
-
-    return () => window.clearTimeout(timer)
   }, [currentPosition, currentUser, screen, selectedVideo, selectedVideoMeta])
 
   useEffect(() => {
