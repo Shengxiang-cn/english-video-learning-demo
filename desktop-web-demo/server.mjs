@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { fetchYouTubeTranscript } from './youtube-transcript-provider.mjs'
+import {
+  createFixedWindowRateLimiter,
+  fetchWithTimeout,
+  isAbortError,
+  requestIp,
+  validateAskRequest,
+  validatePreviewRequest,
+} from './server-security.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -16,6 +24,8 @@ const kimiBaseUrl = process.env.KIMI_BASE_URL ?? 'https://api.moonshot.cn/v1'
 const kimiModel = process.env.KIMI_MODEL ?? 'kimi-k2.5'
 const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY
+const metadataTimeoutMs = Number(process.env.METADATA_TIMEOUT_MS ?? 12_000)
+const kimiTimeoutMs = Number(process.env.KIMI_TIMEOUT_MS ?? 45_000)
 const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 const supabaseAuth = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
@@ -33,9 +43,87 @@ const videosTable = 'learning_videos'
 const notesTable = 'learning_notes'
 const conversationsTable = 'learning_conversations'
 const transcriptChunksTable = 'learning_transcript_chunks'
+const translationsTable = 'learning_translations'
 
-app.use(cors())
+const allowedOrigins = new Set([
+  'https://english-video-learning-demo.onrender.com',
+  'http://127.0.0.1:4173',
+  'http://127.0.0.1:4174',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://localhost:4174',
+  'http://localhost:5173',
+  ...String(process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+])
+
+app.set('trust proxy', 1)
+app.disable('x-powered-by')
+app.use(cors({
+  origin(origin, callback) {
+    callback(null, !origin || allowedOrigins.has(origin))
+  },
+}))
 app.use(express.json({ limit: '1mb' }))
+
+const previewGlobalLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.PREVIEW_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.PREVIEW_GLOBAL_RATE_LIMIT_MAX ?? 300),
+  key: () => 'preview-global',
+  message: 'Video preview is temporarily busy. Please try again later.',
+})
+const previewIpLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.PREVIEW_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.PREVIEW_RATE_LIMIT_MAX ?? 12),
+  key: (req) => `preview:${requestIp(req)}`,
+  message: 'Too many video previews. Please try again later.',
+})
+const importUserLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.IMPORT_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.IMPORT_RATE_LIMIT_MAX ?? 20),
+  key: (req) => `import:${req.user?.id ?? requestIp(req)}`,
+  message: 'Too many video imports. Please try again later.',
+})
+const askGlobalLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.ASK_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.ASK_GLOBAL_RATE_LIMIT_MAX ?? 300),
+  key: () => 'ask-global',
+  message: 'AI is temporarily busy. Please try again later.',
+})
+const askGuestLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.ASK_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.ASK_GUEST_RATE_LIMIT_MAX ?? 6),
+  key: (req) => `ask-guest:${requestIp(req)}`,
+  message: 'Guest AI limit reached. Please log in or try again later.',
+})
+const askUserLimiter = createFixedWindowRateLimiter({
+  windowMs: Number(process.env.ASK_RATE_LIMIT_WINDOW_MS ?? 10 * 60 * 1000),
+  maxRequests: Number(process.env.ASK_USER_RATE_LIMIT_MAX ?? 120),
+  key: (req) => `ask-user:${req.user?.id ?? requestIp(req)}`,
+  message: 'AI request limit reached. Please try again later.',
+})
+
+function askIdentityLimiter(req, res, next) {
+  return req.user ? askUserLimiter(req, res, next) : askGuestLimiter(req, res, next)
+}
+
+function validatePreviewBody(req, res, next) {
+  const validationError = validatePreviewRequest(req.body)
+  if (validationError) {
+    return res.status(400).json({ error: validationError, code: 'INVALID_REQUEST' })
+  }
+  return next()
+}
+
+function validateAskBody(req, res, next) {
+  const validationError = validateAskRequest(req.body)
+  if (validationError) {
+    return res.status(400).json({ error: validationError, code: 'INVALID_REQUEST' })
+  }
+  return next()
+}
 
 function publicUser(user) {
   if (!user) return null
@@ -119,6 +207,10 @@ function contractVideoFromRow(row) {
     durationSec: row.duration_sec ?? 0,
     thumbnailUrl: row.cover_image ?? undefined,
     transcript: row.transcript ?? [],
+    transcriptLanguage: row.transcript_language ?? null,
+    transcriptSource: row.transcript_source ?? null,
+    transcriptLanguages: Array.isArray(row.transcript_languages) ? row.transcript_languages : [],
+    transcriptError: row.transcript_error ?? null,
     status: row.status ?? 'inbox',
     isFavourite: Boolean(row.is_favourite),
     tags: Array.isArray(row.tags) ? row.tags : [],
@@ -255,7 +347,21 @@ function rowToConversation(row) {
     question: row.question,
     quote: row.quote ?? '',
     answer: row.answer,
+    citations: Array.isArray(row.citations) ? row.citations : [],
+    followUps: Array.isArray(row.follow_ups) ? row.follow_ups : [],
     createdAt: row.created_at,
+  }
+}
+
+function rowToTranslation(row) {
+  return {
+    videoId: row.video_id,
+    language: row.language,
+    segments: row.segments && typeof row.segments === 'object' && !Array.isArray(row.segments)
+      ? row.segments
+      : {},
+    status: row.status ?? 'ready',
+    updatedAt: row.updated_at,
   }
 }
 
@@ -545,24 +651,61 @@ function formatTranscriptForPrompt(transcript) {
     .join('\n')
 }
 
-function buildTranscriptContext({ transcript, strategy = 'full' } = {}) {
+function buildTranscriptContext({
+  transcript,
+  question = '',
+  currentPlaybackTime = 0,
+  selectedSubtitle = null,
+  maxTokens = 12_000,
+} = {}) {
   const cleanTranscript = Array.isArray(transcript) ? transcript : []
-
-  if (strategy === 'hybrid') {
+  const fullContext = formatTranscriptForPrompt(cleanTranscript)
+  const fullTokenEstimate = estimateTokens(fullContext)
+  if (fullTokenEstimate <= maxTokens) {
     return {
-      strategy,
-      context: formatTranscriptForPrompt(cleanTranscript),
-      tokenEstimate: estimateTokens(formatTranscriptForPrompt(cleanTranscript)),
+      strategy: 'full',
+      context: fullContext,
+      tokenEstimate: fullTokenEstimate,
       segmentCount: cleanTranscript.length,
+      sourceSegmentCount: cleanTranscript.length,
     }
   }
 
-  const context = formatTranscriptForPrompt(cleanTranscript)
+  const keywords = [...new Set(
+    String(question)
+      .toLowerCase()
+      .match(/[a-z0-9][a-z0-9'-]{2,}/g) ?? [],
+  )].filter((word) => !['about', 'could', 'explain', 'from', 'have', 'that', 'this', 'video', 'what', 'when', 'where', 'which', 'with', 'would'].includes(word))
+  const focusTime = Number(selectedSubtitle?.startSec ?? currentPlaybackTime) || 0
+  const ranked = cleanTranscript.map((segment, index) => {
+    const text = String(segment.text ?? '').toLowerCase()
+    const keywordScore = keywords.reduce((score, keyword) => score + (text.includes(keyword) ? 12 : 0), 0)
+    const distance = Math.abs((Number(segment.startSec) || 0) - focusTime)
+    const proximityScore = distance <= 45 ? 30 : distance <= 180 ? 18 : distance <= 600 ? 6 : 0
+    const selectedScore = selectedSubtitle?.text && text.includes(String(selectedSubtitle.text).toLowerCase().slice(0, 80)) ? 60 : 0
+    return { segment, index, score: keywordScore + proximityScore + selectedScore }
+  })
+  ranked.sort((a, b) => b.score - a.score || a.index - b.index)
+
+  const selectedIndexes = new Set()
+  let characterCount = 0
+  const characterBudget = maxTokens * 4
+  for (const candidate of ranked) {
+    const segmentText = String(candidate.segment.text ?? '')
+    if (selectedIndexes.size > 0 && characterCount + segmentText.length > characterBudget) continue
+    selectedIndexes.add(candidate.index)
+    characterCount += segmentText.length
+    if (characterCount >= characterBudget) break
+  }
+
+  const focusedTranscript = cleanTranscript.filter((_segment, index) => selectedIndexes.has(index))
+  const context = formatTranscriptForPrompt(focusedTranscript)
   return {
-    strategy: 'full',
+    strategy: 'focused',
     context,
     tokenEstimate: estimateTokens(context),
-    segmentCount: cleanTranscript.length,
+    segmentCount: focusedTranscript.length,
+    sourceSegmentCount: cleanTranscript.length,
   }
 }
 
@@ -810,7 +953,11 @@ function normalizeSelectedSubtitle(value) {
 
 async function fetchOembed(url) {
   try {
-    const response = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`)
+    const response = await fetchWithTimeout(
+      `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`,
+      {},
+      metadataTimeoutMs,
+    )
     if (response.ok) {
       return response.json()
     }
@@ -818,7 +965,11 @@ async function fetchOembed(url) {
     // Some local networks cannot reach YouTube directly; noembed keeps the import flow usable.
   }
 
-  const fallback = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`)
+  const fallback = await fetchWithTimeout(
+    `https://noembed.com/embed?url=${encodeURIComponent(url)}`,
+    {},
+    metadataTimeoutMs,
+  )
   if (!fallback.ok) {
     throw new Error('Unable to read YouTube metadata.')
   }
@@ -940,12 +1091,14 @@ app.get('/api/health', (_req, res) => {
 
 app.get('/api/library', requireAuth, async (req, res) => {
   const db = requestSupabase(req)
-  const [videosResult, notesResult] = await Promise.all([
-    db.from(videosTable).select('*').order('saved_at', { ascending: false }),
-    db.from(notesTable).select('*').order('saved_at', { ascending: false }),
+  const [videosResult, notesResult, conversationsResult, translationsResult] = await Promise.all([
+    db.from(videosTable).select('*').eq('user_id', req.user.id).order('saved_at', { ascending: false }),
+    db.from(notesTable).select('*').eq('user_id', req.user.id).order('saved_at', { ascending: false }),
+    db.from(conversationsTable).select('*').eq('user_id', req.user.id).order('created_at', { ascending: true }),
+    db.from(translationsTable).select('*').eq('user_id', req.user.id),
   ])
 
-  const error = videosResult.error ?? notesResult.error
+  const error = videosResult.error ?? notesResult.error ?? conversationsResult.error ?? translationsResult.error
   if (error) {
     return res.status(500).json({ error: error.message })
   }
@@ -953,10 +1106,12 @@ app.get('/api/library', requireAuth, async (req, res) => {
   res.json({
     videos: (videosResult.data ?? []).map(rowToVideo),
     notes: (notesResult.data ?? []).map(rowToNote),
+    conversations: (conversationsResult.data ?? []).map(rowToConversation),
+    translations: (translationsResult.data ?? []).map(rowToTranslation),
   })
 })
 
-app.post('/api/youtube/preview', async (req, res) => {
+app.post('/api/youtube/preview', validatePreviewBody, previewGlobalLimiter, previewIpLimiter, async (req, res) => {
   try {
     const { video, transcript } = await parseYouTubeForLearning(req.body)
     res.json({
@@ -965,11 +1120,14 @@ app.post('/api/youtube/preview', async (req, res) => {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to preview this YouTube video.'
+    if (isAbortError(error)) {
+      return res.status(504).json({ error: 'Video metadata provider timed out.', code: 'UPSTREAM_TIMEOUT' })
+    }
     res.status(400).json({ error: message })
   }
 })
 
-app.post('/api/youtube/import', requireAuth, async (req, res) => {
+app.post('/api/youtube/import', requireAuth, validatePreviewBody, importUserLimiter, async (req, res) => {
   try {
     const requestedStatus = req.body?.status === 'learning' ? 'learning' : 'inbox'
     const forceReopen = req.body?.forceReopen === true
@@ -989,6 +1147,7 @@ app.post('/api/youtube/import', requireAuth, async (req, res) => {
     const { data: existingVideo, error: existingError } = await db
       .from(videosTable)
       .select('*')
+      .eq('user_id', req.user.id)
       .eq('id', importedVideo.id)
       .maybeSingle()
 
@@ -1014,6 +1173,7 @@ app.post('/api/youtube/import', requireAuth, async (req, res) => {
           transcript_error: importedVideo.transcriptError,
           updated_at: new Date().toISOString(),
         })
+        .eq('user_id', req.user.id)
         .eq('id', importedVideo.id)
         .select('*')
         .single()
@@ -1041,6 +1201,9 @@ app.post('/api/youtube/import', requireAuth, async (req, res) => {
     res.json({ video: contractVideoFromRow(data) })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to import this YouTube video.'
+    if (isAbortError(error)) {
+      return res.status(504).json({ error: 'Video metadata provider timed out.', code: 'UPSTREAM_TIMEOUT' })
+    }
     res.status(500).json({ error: message })
   }
 })
@@ -1056,6 +1219,7 @@ app.post('/api/videos/:videoId/progress', requireAuth, async (req, res) => {
         last_position_label: safePosition > 0 ? `Continue at ${formatDuration(safePosition)}` : 'Not started',
         last_watched_at: new Date().toISOString(),
       })
+      .eq('user_id', req.user.id)
       .eq('id', req.params.videoId)
       .select('*')
       .maybeSingle()
@@ -1075,11 +1239,168 @@ app.post('/api/videos/:videoId/progress', requireAuth, async (req, res) => {
   }
 })
 
+app.patch('/api/videos/:videoId', requireAuth, async (req, res) => {
+  try {
+    const patch = {}
+    if (req.body?.status !== undefined) {
+      if (!['inbox', 'learning', 'done'].includes(req.body.status)) {
+        return res.status(400).json({ error: 'Unsupported video status.', code: 'INVALID_REQUEST' })
+      }
+      patch.status = req.body.status
+    }
+    if (req.body?.isFavourite !== undefined) {
+      if (typeof req.body.isFavourite !== 'boolean') {
+        return res.status(400).json({ error: 'isFavourite must be a boolean.', code: 'INVALID_REQUEST' })
+      }
+      patch.is_favourite = req.body.isFavourite
+    }
+    if (req.body?.tags !== undefined) {
+      if (!Array.isArray(req.body.tags) || req.body.tags.length > 20) {
+        return res.status(400).json({ error: 'Video tags must be an array with at most 20 items.', code: 'INVALID_REQUEST' })
+      }
+      const tags = [...new Set(req.body.tags.map((tag) => String(tag).trim()).filter(Boolean))]
+      if (tags.some((tag) => tag.length > 64)) {
+        return res.status(400).json({ error: 'Video tags must be 64 characters or fewer.', code: 'INVALID_REQUEST' })
+      }
+      patch.tags = tags
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'No supported video fields were provided.', code: 'INVALID_REQUEST' })
+    }
+
+    patch.updated_at = new Date().toISOString()
+    const db = requestSupabase(req)
+    const { data, error } = await db
+      .from(videosTable)
+      .update(patch)
+      .eq('user_id', req.user.id)
+      .eq('id', req.params.videoId)
+      .select('*')
+      .maybeSingle()
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Video not found.' })
+    }
+
+    return res.json(rowToVideo(data))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update video.'
+    return res.status(500).json({ error: message })
+  }
+})
+
+app.delete('/api/videos/:videoId', requireAuth, async (req, res) => {
+  try {
+    const videoId = String(req.params.videoId ?? '').trim()
+    if (!videoId || videoId.length > 200) {
+      return res.status(400).json({ error: 'Invalid video ID.', code: 'INVALID_REQUEST' })
+    }
+
+    const db = requestSupabase(req)
+    const childTables = [translationsTable, notesTable, conversationsTable, transcriptChunksTable]
+    for (const table of childTables) {
+      const { error } = await db
+        .from(table)
+        .delete()
+        .eq('user_id', req.user.id)
+        .eq('video_id', videoId)
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+    }
+
+    const { data, error } = await db
+      .from(videosTable)
+      .delete()
+      .eq('user_id', req.user.id)
+      .eq('id', videoId)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Video not found.' })
+    }
+
+    return res.json({ deleted: true, videoId })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete video.'
+    return res.status(500).json({ error: message })
+  }
+})
+
+app.put('/api/videos/:videoId/translations/:language', requireAuth, async (req, res) => {
+  try {
+    const videoId = String(req.params.videoId ?? '').trim()
+    const language = String(req.params.language ?? '').trim()
+    const segments = req.body?.segments
+    const status = String(req.body?.status ?? 'ready')
+
+    if (!videoId || videoId.length > 200 || !language || language.length > 64) {
+      return res.status(400).json({ error: 'Invalid video or language.', code: 'INVALID_REQUEST' })
+    }
+    if (!segments || typeof segments !== 'object' || Array.isArray(segments)) {
+      return res.status(400).json({ error: 'Translation segments must be an object.', code: 'INVALID_REQUEST' })
+    }
+    const entries = Object.entries(segments)
+    if (entries.length > 2_000 || entries.some(([segmentId, text]) => segmentId.length > 200 || typeof text !== 'string' || text.length > 2_000)) {
+      return res.status(400).json({ error: 'Translation cache is outside the supported size.', code: 'INVALID_REQUEST' })
+    }
+    if (!['partial', 'ready', 'failed'].includes(status)) {
+      return res.status(400).json({ error: 'Unsupported translation status.', code: 'INVALID_REQUEST' })
+    }
+
+    const db = requestSupabase(req)
+    const { data, error } = await db
+      .from(translationsTable)
+      .upsert({
+        user_id: req.user.id,
+        video_id: videoId,
+        language,
+        segments,
+        status,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,video_id,language' })
+      .select('*')
+      .single()
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+
+    return res.json(rowToTranslation(data))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to cache translation.'
+    return res.status(500).json({ error: message })
+  }
+})
+
 app.post('/api/notes', requireAuth, async (req, res) => {
   try {
     const note = req.body?.note
     if (!note?.id || !note?.videoId || !note?.quote) {
-      return res.status(400).json({ error: 'Missing note fields.' })
+      return res.status(400).json({ error: 'Missing note fields.', code: 'INVALID_REQUEST' })
+    }
+    if (String(note.id).length > 200 || String(note.videoId).length > 200 || String(note.videoTitle ?? '').length > 500) {
+      return res.status(400).json({ error: 'Note identity fields are too long.', code: 'INVALID_REQUEST' })
+    }
+    if (String(note.quote).length > 12_000 || String(note.content ?? '').length > 20_000 || String(note.note ?? '').length > 20_000) {
+      return res.status(400).json({ error: 'Note content is too long.', code: 'INVALID_REQUEST' })
+    }
+    if (!['manual', 'ai', 'highlight', 'thought'].includes(String(note.source ?? ''))) {
+      return res.status(400).json({ error: 'Unsupported note source.', code: 'INVALID_REQUEST' })
+    }
+    if (note.type != null && !['highlight', 'thought', 'explanation', 'keyIdea', 'reviewQuestion', 'videoBrief'].includes(String(note.type))) {
+      return res.status(400).json({ error: 'Unsupported note type.', code: 'INVALID_REQUEST' })
+    }
+    if (!Array.isArray(note.tags ?? []) || (note.tags ?? []).length > 20) {
+      return res.status(400).json({ error: 'Note tags are outside the supported size.', code: 'INVALID_REQUEST' })
     }
 
     const storedNote = {
@@ -1105,6 +1426,36 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   }
 })
 
+app.delete('/api/notes/:noteId', requireAuth, async (req, res) => {
+  try {
+    const noteId = String(req.params.noteId ?? '').trim()
+    if (!noteId || noteId.length > 200) {
+      return res.status(400).json({ error: 'Invalid note ID.', code: 'INVALID_REQUEST' })
+    }
+
+    const db = requestSupabase(req)
+    const { data, error } = await db
+      .from(notesTable)
+      .delete()
+      .eq('user_id', req.user.id)
+      .eq('id', noteId)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Note not found.' })
+    }
+
+    return res.json({ deleted: true, noteId })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete note.'
+    return res.status(500).json({ error: message })
+  }
+})
+
 app.post('/api/guest/migrate', requireAuth, async (req, res) => {
   try {
     const temporaryVideo = req.body?.temporaryVideo
@@ -1121,6 +1472,7 @@ app.post('/api/guest/migrate', requireAuth, async (req, res) => {
     const { data: existingVideo, error: existingError } = await db
       .from(videosTable)
       .select('*')
+      .eq('user_id', req.user.id)
       .eq('id', storedVideo.id)
       .maybeSingle()
 
@@ -1188,7 +1540,7 @@ app.post('/api/guest/migrate', requireAuth, async (req, res) => {
   }
 })
 
-app.post('/api/ask', optionalAuth, async (req, res) => {
+app.post('/api/ask', validateAskBody, askGlobalLimiter, optionalAuth, askIdentityLimiter, async (req, res) => {
   try {
     const apiKey = process.env.KIMI_API_KEY
     if (!apiKey) {
@@ -1230,7 +1582,7 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
         },
       ]
 
-      const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
+      const response = await fetchWithTimeout(`${kimiBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -1241,9 +1593,9 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
           thinking: { type: 'disabled' },
           messages,
         }),
-      })
+      }, kimiTimeoutMs)
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
         return res.status(response.status).json({ error: data?.error?.message ?? 'Kimi request failed.' })
       }
@@ -1312,7 +1664,12 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
       return res.status(400).json({ error: 'No subtitle context was provided for this question.' })
     }
 
-    const transcriptSource = buildTranscriptContext({ transcript, strategy: 'full' })
+    const transcriptSource = buildTranscriptContext({
+      transcript,
+      question,
+      currentPlaybackTime,
+      selectedSubtitle,
+    })
     const selectedSubtitleBlock = selectedSubtitle
       ? [
           `Focus subtitle timestamp: ${formatDuration(selectedSubtitle.startSec)}-${formatDuration(selectedSubtitle.endSec)}`,
@@ -1355,7 +1712,8 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
           `Question: ${question}`,
           `Transcript strategy: ${transcriptSource.strategy}`,
           `Transcript token estimate: ${transcriptSource.tokenEstimate}`,
-          'Full transcript source:',
+          `Transcript segments included: ${transcriptSource.segmentCount}/${transcriptSource.sourceSegmentCount}`,
+          transcriptSource.strategy === 'full' ? 'Full transcript source:' : 'Focused transcript source:',
           transcriptSource.context,
         ]
           .filter(Boolean)
@@ -1363,7 +1721,7 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
       },
     ]
 
-    const response = await fetch(`${kimiBaseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${kimiBaseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -1374,9 +1732,9 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
         thinking: { type: 'disabled' },
         messages,
       }),
-    })
+    }, kimiTimeoutMs)
 
-    const data = await response.json()
+    const data = await response.json().catch(() => ({}))
     if (!response.ok) {
       return res.status(response.status).json({ error: data?.error?.message ?? 'Kimi request failed.' })
     }
@@ -1384,6 +1742,12 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
     const rawAnswer = data?.choices?.[0]?.message?.content ?? 'No answer returned.'
     const structuredAnswer = parseStructuredAiResponse(rawAnswer)
     const answer = structuredAnswer.answer
+    const normalizedCitations = normalizeCitations(structuredAnswer.citations, video)
+    const citations = normalizedCitations.length > 0
+      ? normalizedCitations
+      : citationsFromTimestamps(structuredAnswer.timestamps, answer, video)
+    const followUps = normalizeFollowUps(structuredAnswer.followUps)
+    const saveCandidates = normalizeSaveCandidates(structuredAnswer.saveCandidates)
     let conversation = null
 
     if (mode === 'authenticated' && db && req.user) {
@@ -1395,6 +1759,8 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
         question,
         quote: selectedSubtitle?.text ?? null,
         answer,
+        citations,
+        follow_ups: followUps,
         created_at: new Date().toISOString(),
       }
       const { data: savedConversation, error: conversationError } = await db
@@ -1410,11 +1776,32 @@ app.post('/api/ask', optionalAuth, async (req, res) => {
       conversation = rowToConversation(savedConversation)
     }
 
-    res.json({ answer, conversation })
+    res.json({ answer, citations, followUps, saveCandidates, conversation })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to ask AI.'
+    if (isAbortError(error)) {
+      return res.status(504).json({ error: 'AI provider timed out.', code: 'UPSTREAM_TIMEOUT' })
+    }
     res.status(500).json({ error: message })
   }
+})
+
+app.use((error, _req, res, next) => {
+  if (error?.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request body is too large.',
+      code: 'PAYLOAD_TOO_LARGE',
+    })
+  }
+
+  if (error instanceof SyntaxError && error?.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      error: 'Request body must be valid JSON.',
+      code: 'INVALID_JSON',
+    })
+  }
+
+  return next(error)
 })
 
 app.use(express.static(path.join(__dirname, 'dist')))
@@ -1422,6 +1809,11 @@ app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'))
 })
 
-app.listen(port, host, () => {
-  console.log(`Video learning app listening on http://${host}:${port}`)
-})
+export { app, buildTranscriptContext, parseStructuredAiResponse }
+
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isDirectRun) {
+  app.listen(port, host, () => {
+    console.log(`Video learning app listening on http://${host}:${port}`)
+  })
+}

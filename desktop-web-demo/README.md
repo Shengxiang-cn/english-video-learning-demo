@@ -29,7 +29,11 @@ Full YouTube + AI mode:
 - `npm run serve:full` builds the frontend and runs `server.mjs`.
 - `POST /api/youtube/import` imports a YouTube URL, reads metadata, and attempts to fetch English captions.
 - `POST /api/ask` asks Kimi about the imported transcript or highlighted passage.
-- `GET /api/library` restores imported videos and notes from the server store.
+- `GET /api/library` restores videos, notes, conversations, and translation caches through the authenticated server boundary.
+- `POST /api/videos/:videoId/progress` persists playback progress.
+- `PATCH /api/videos/:videoId` updates status, favourite state, and tags.
+- `PUT /api/videos/:videoId/translations/:language` persists bounded translation caches.
+- `DELETE /api/videos/:videoId` and `DELETE /api/notes/:noteId` remove owned workspace data.
 - `POST /api/notes` persists highlighted notes and AI explanations.
 
 Deployment note:
@@ -37,4 +41,5 @@ Deployment note:
 - GitHub Pages can host the static UI, but it cannot securely run the Kimi API proxy or YouTube transcript parser.
 - For the real online version, deploy this folder as a Node app on a server platform such as Render, Railway, Fly.io, or Vercel with a server runtime and set the `.env.example` variables there.
 - A Render blueprint is included at `../render.yaml`; connect the GitHub repo and set `KIMI_API_KEY` in Render's environment variables. Add `SUPADATA_API_KEY` if you need reliable YouTube captions from cloud server IPs.
-- The default MVP store writes to `DATA_DIR/store.json`. For a real team deployment, attach persistent disk storage or replace this file store with Postgres/Supabase.
+- Learning data is stored in Supabase behind RLS. The browser uses Supabase only for Auth; all learning-data reads and writes go through the same-origin Node API.
+- Database migrations live in `../supabase/migrations/`. Apply them before deploying server code that depends on a new contract.

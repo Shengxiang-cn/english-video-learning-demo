@@ -1,7 +1,4 @@
-import { Fragment, startTransition, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Fragment, lazy, startTransition, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   ArrowLeft,
   BookOpen,
@@ -9,7 +6,6 @@ import {
   ChevronDown,
   Check,
   Copy,
-  FileText,
   Home as HomeIcon,
   Loader2,
   Lock,
@@ -23,10 +19,12 @@ import {
   Star,
   StickyNote,
   ThumbsUp,
-  Video,
   X,
 } from 'lucide-react'
 import './App.css'
+import { requestJson } from './apiClient'
+import type { ContractVideo, GuestMigrateResponse, ImportResponse, PreviewResponse } from './apiContracts'
+import AppDialog from './components/AppDialog'
 import {
   askSuggestions,
   catalogVideos,
@@ -34,6 +32,8 @@ import {
   type DemoVideo,
 } from './mockData'
 import { isSupabaseConfigured, supabase, toAuthUser } from './supabaseClient'
+
+const MarkdownMessage = lazy(() => import('./MarkdownMessage'))
 
 type Screen = 'home' | 'library' | 'reader' | 'notes'
 type RightTab = 'info' | 'note' | 'chat' | 'subtitle'
@@ -58,44 +58,17 @@ type PendingAction =
   | { type: 'edit-tags'; videoId: string }
   | { type: 'save-video' }
 
-type ContractVideo = {
-  id: string
-  youtubeId: string
-  youtubeUrl: string
-  title: string
-  channel: string
-  durationSec: number
-  thumbnailUrl: string
-  transcript?: DemoVideo['transcript']
-  status?: InboxTab
-  isFavourite?: boolean
-  tags?: string[]
-  transcriptLanguage?: string | null
-  transcriptSource?: string | null
-  transcriptLanguages?: string[]
-  transcriptError?: unknown
-  lastPositionSec?: number
-  lastWatchedAt?: string | null
-  savedAt?: string
-}
-
-type PreviewResponse = {
-  video: ContractVideo
-  transcript: DemoVideo['transcript']
-}
-
-type ImportResponse = {
-  video: ContractVideo
-}
-
-type GuestMigrateResponse = {
-  video: {
-    id: string
-    youtubeId: string
-    status: InboxTab
-  }
-  notes: unknown[]
-  conversations: unknown[]
+type WorkspaceResponse = {
+  videos: DemoVideo[]
+  notes: SavedNote[]
+  conversations: ChatRecord[]
+  translations: Array<{
+    videoId: string
+    language: string
+    segments: Record<string, string>
+    status: 'partial' | 'ready' | 'failed'
+    updatedAt?: string
+  }>
 }
 
 type TemporaryChatRecord = {
@@ -187,64 +160,6 @@ type ChatRecord = {
   createdAt: string
 }
 
-type LearningVideoRow = {
-  id: string
-  title: string
-  channel: string
-  duration_label: string
-  duration_sec: number
-  last_position_sec: number
-  last_position_label: string
-  summary: string
-  youtube_url: string
-  youtube_id?: string | null
-  source_type?: 'mock' | 'youtube'
-  accent: string
-  cover_image?: string | null
-  player_image?: string | null
-  cover_eyebrow: string
-  cover_title: string
-  cover_detail: string
-  transcript_language?: string | null
-  transcript_source?: string | null
-  transcript_languages?: unknown
-  transcript_error?: unknown
-  transcript: DemoVideo['transcript']
-  status?: InboxTab | null
-  is_favourite?: boolean | null
-  tags?: unknown
-  saved_at?: string
-}
-
-type LearningNoteRow = {
-  id: string
-  video_id: string
-  video_title?: string | null
-  quote: string
-  timestamp_label: string
-  note: string
-  takeaway: string
-  tags?: unknown
-  type?: NoteType | null
-  original_subtitle?: string | null
-  content?: string | null
-  topics?: unknown
-  created_at?: string
-  saved_at?: string
-  is_starred?: boolean | null
-  source: SavedNote['source']
-}
-
-type LearningTranslationRow = {
-  user_id?: string
-  video_id: string
-  language: string
-  segments?: unknown
-  status?: 'partial' | 'ready' | 'failed'
-  created_at?: string
-  updated_at?: string
-}
-
 type PendingChatRequest = {
   id: string
   question: string
@@ -283,6 +198,19 @@ function getAuthRedirectUrl() {
   return typeof window === 'undefined' ? undefined : window.location.origin
 }
 
+async function getAccessToken() {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.')
+  }
+
+  const { data, error } = await supabase.auth.getSession()
+  if (error || !data.session?.access_token) {
+    throw new Error('Please log in again.')
+  }
+
+  return data.session.access_token
+}
+
 function authErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : 'Authentication failed.'
   const normalized = message.toLowerCase()
@@ -312,7 +240,7 @@ function authErrorMessage(error: unknown) {
 
 const defaultVideoMeta: VideoMeta = { status: 'inbox', isFavourite: false, tags: [] }
 
-const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof Video }> = [
+const sidebarCollections: Array<{ label: string; screen: Screen; icon: typeof HomeIcon }> = [
   { label: 'Home', screen: 'home', icon: HomeIcon },
   { label: 'Library', screen: 'library', icon: BookOpen },
   { label: 'Notes', screen: 'notes', icon: StickyNote },
@@ -727,113 +655,7 @@ function videoMetaFromVideo(video: DemoVideo): VideoMeta {
   }
 }
 
-function videoToRow(video: DemoVideo, userId: string, meta: VideoMeta = videoMetaFromVideo(video)): LearningVideoRow & { user_id: string } {
-  return {
-    id: video.id,
-    user_id: userId,
-    title: video.title,
-    channel: video.channel,
-    duration_label: video.durationLabel,
-    duration_sec: video.durationSec,
-    last_position_sec: video.lastPositionSec,
-    last_position_label: video.lastPositionLabel,
-    summary: video.summary,
-    youtube_url: video.youtubeUrl,
-    youtube_id: video.youtubeId ?? null,
-    source_type: video.sourceType ?? 'youtube',
-    accent: video.accent,
-    cover_image: video.coverImage ?? null,
-    player_image: video.playerImage ?? null,
-    cover_eyebrow: video.coverEyebrow,
-    cover_title: video.coverTitle,
-    cover_detail: video.coverDetail,
-    transcript_language: video.transcriptLanguage ?? null,
-    transcript_source: video.transcriptSource ?? null,
-    transcript_languages: video.transcriptLanguages ?? [],
-    transcript_error: video.transcriptError ?? null,
-    transcript: video.transcript ?? [],
-    status: meta.status,
-    is_favourite: meta.isFavourite,
-    tags: meta.tags,
-    saved_at: video.savedAt ?? new Date().toISOString(),
-  }
-}
-
-function rowToVideo(row: LearningVideoRow): DemoVideo {
-  return {
-    id: row.id,
-    title: row.title,
-    channel: row.channel,
-    durationLabel: row.duration_label,
-    durationSec: row.duration_sec,
-    lastPositionSec: row.last_position_sec,
-    lastPositionLabel: row.last_position_label,
-    summary: row.summary,
-    youtubeUrl: row.youtube_url,
-    youtubeId: row.youtube_id ?? undefined,
-    sourceType: row.source_type ?? 'youtube',
-    accent: row.accent,
-    coverImage: row.cover_image ?? undefined,
-    playerImage: row.player_image ?? undefined,
-    coverEyebrow: row.cover_eyebrow,
-    coverTitle: row.cover_title,
-    coverDetail: row.cover_detail,
-    status: normalizedStatus(row.status, row.last_position_sec > 0 ? 'learning' : 'inbox'),
-    isFavourite: Boolean(row.is_favourite),
-    tags: stringArray(row.tags),
-    transcriptLanguage: row.transcript_language ?? null,
-    transcriptSource: row.transcript_source ?? null,
-    transcriptLanguages: stringArray(row.transcript_languages),
-    transcriptError: row.transcript_error ?? null,
-    transcript: row.transcript ?? [],
-    savedAt: row.saved_at,
-  }
-}
-
-function noteToRow(note: SavedNote, userId?: string) {
-  return {
-    id: note.id,
-    user_id: userId,
-    video_id: note.videoId,
-    video_title: note.videoTitle ?? null,
-    quote: note.quote,
-    timestamp_label: note.timestamp,
-    note: note.note,
-    takeaway: note.takeaway,
-    tags: note.tags ?? [],
-    type: note.type ?? null,
-    original_subtitle: note.originalSubtitle ?? null,
-    content: note.content ?? null,
-    topics: note.topics ?? [],
-    created_at: note.createdAt ?? new Date().toISOString(),
-    saved_at: note.savedAt ?? new Date().toISOString(),
-    is_starred: Boolean(note.isStarred),
-    source: note.source,
-  }
-}
-
-function rowToNote(row: LearningNoteRow): SavedNote {
-  return {
-    id: row.id,
-    videoId: row.video_id,
-    videoTitle: row.video_title ?? undefined,
-    quote: row.quote,
-    timestamp: row.timestamp_label,
-    note: row.note,
-    takeaway: row.takeaway,
-    tags: stringArray(row.tags),
-    type: row.type ?? undefined,
-    originalSubtitle: row.original_subtitle ?? undefined,
-    content: row.content ?? undefined,
-    topics: stringArray(row.topics),
-    createdAt: row.created_at,
-    savedAt: row.saved_at,
-    isStarred: Boolean(row.is_starred),
-    source: row.source,
-  }
-}
-
-function rowsToTranslatedSegments(rows: LearningTranslationRow[]) {
+function rowsToTranslatedSegments(rows: WorkspaceResponse['translations']) {
   return rows.reduce<Record<string, string>>((acc, row) => {
     const segments = row.segments
     if (!segments || Array.isArray(segments) || typeof segments !== 'object') {
@@ -842,7 +664,7 @@ function rowsToTranslatedSegments(rows: LearningTranslationRow[]) {
 
     Object.entries(segments as Record<string, unknown>).forEach(([segmentId, text]) => {
       if (typeof text === 'string') {
-        acc[translationKey(row.video_id, row.language, segmentId)] = text
+        acc[translationKey(row.videoId, row.language, segmentId)] = text
       }
     })
 
@@ -1008,7 +830,7 @@ function App() {
   const [noteDraft, setNoteDraft] = useState('')
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([])
   const [chatRecords, setChatRecords] = useState<ChatRecord[]>([])
-  const [toast, setToast] = useState<string | null>('Select text inside the transcript to ask AI or attach a note.')
+  const [toast, setToast] = useState<string | null>(null)
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
   const [isSelectionGestureActive, setIsSelectionGestureActive] = useState(false)
   const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
@@ -1074,6 +896,18 @@ function App() {
     !isAsking &&
     !hasChatActivity
 
+  const persistProgress = useCallback(async (videoId: string, positionSec: number) => {
+    const safePosition = Math.max(0, Math.round(positionSec))
+    const accessToken = await getAccessToken()
+    const updatedVideo = await requestJson<DemoVideo>(
+      `/api/videos/${encodeURIComponent(videoId)}/progress`,
+      { method: 'POST', body: { positionSec: safePosition }, accessToken },
+    )
+    lastSavedProgressRef.current[videoId] = updatedVideo.lastPositionSec
+    setVideos((current) => current.map((video) => (video.id === updatedVideo.id ? { ...video, ...updatedVideo } : video)))
+    return updatedVideo
+  }, [])
+
   useEffect(() => {
     if (!guestWorkspace) {
       window.localStorage.removeItem('vist.guestWorkspace')
@@ -1123,57 +957,30 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, pendingAction, pendingMigratedVideoId, showAuthModal])
 
-  async function getAccessToken() {
-    if (!supabase) {
-      throw new Error('Supabase is not configured.')
-    }
-
-    const { data, error } = await supabase.auth.getSession()
-    if (error || !data.session?.access_token) {
-      throw new Error('Please log in again.')
-    }
-
-    return data.session.access_token
-  }
-
-  async function refreshLibraryState() {
-    if (!supabase) {
-      return
-    }
-
-    const [videosResult, notesResult, translationsResult] = await Promise.all([
-      supabase.from('learning_videos').select('*').order('saved_at', { ascending: false }),
-      supabase.from('learning_notes').select('*').order('saved_at', { ascending: false }),
-      supabase.from('learning_translations').select('*'),
-    ])
-
-    const error = videosResult.error ?? notesResult.error ?? translationsResult.error
-    if (error) throw error
-
-    const persistedVideos = ((videosResult.data ?? []) as LearningVideoRow[]).map(rowToVideo)
-    const persistedNotes = ((notesResult.data ?? []) as LearningNoteRow[]).map(rowToNote)
-    const persistedTranslations = rowsToTranslatedSegments((translationsResult.data ?? []) as LearningTranslationRow[])
+  const refreshLibraryState = useCallback(async () => {
+    const accessToken = await getAccessToken()
+    const workspace = await requestJson<WorkspaceResponse>('/api/library', { accessToken })
+    const persistedVideos = workspace.videos ?? []
+    const persistedNotes = workspace.notes ?? []
+    const persistedTranslations = rowsToTranslatedSegments(workspace.translations ?? [])
     const mergedVideos = [
       ...persistedVideos,
       ...catalogVideos.filter((video) => !persistedVideos.some((persisted) => persisted.id === video.id)),
     ]
-    const mergedIds = [
-      ...persistedVideos.map((video) => video.id),
-      ...initialLibraryIds.filter((id) => !persistedVideos.some((video) => video.id === id)),
-    ]
+    const mergedIds = persistedVideos.map((video) => video.id)
 
     setVideos(mergedVideos)
     setVideoMeta(initialVideoMeta(mergedVideos))
     setLibraryIds(mergedIds)
     setSavedNotes(persistedNotes)
-    setChatRecords([])
+    setChatRecords(workspace.conversations ?? [])
     setTranslatedSegments(persistedTranslations)
 
     if (persistedVideos.length > 0) {
       setSelectedVideoId(persistedVideos[0].id)
       setCurrentPosition(persistedVideos[0].lastPositionSec || persistedVideos[0].transcript[0]?.startSec || 0)
     }
-  }
+  }, [])
 
   useEffect(() => {
     let isMounted = true
@@ -1246,7 +1053,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [currentUser, isAuthChecked])
+  }, [currentUser, isAuthChecked, refreshLibraryState])
 
   useEffect(() => {
     if (screen !== 'reader' || !isPlaying || transcript.length === 0) {
@@ -1327,6 +1134,8 @@ function App() {
 
   useEffect(() => {
     function syncYoutubeProgress(event: MessageEvent) {
+      if (event.source !== youtubeFrameRef.current?.contentWindow) return
+      if (event.origin !== 'https://www.youtube.com' && event.origin !== 'https://www.youtube-nocookie.com') return
       if (typeof event.data !== 'string') return
 
       try {
@@ -1358,7 +1167,7 @@ function App() {
     const timer = window.setInterval(() => {
       youtubeFrameRef.current?.contentWindow?.postMessage(
         JSON.stringify({ event: 'listening', id: 'video-learning-demo' }),
-        '*',
+        'https://www.youtube.com',
       )
       sendYoutubeCommand('getCurrentTime')
     }, 900)
@@ -1372,11 +1181,10 @@ function App() {
   }, [currentPosition, selectedVideoId])
 
   useEffect(() => {
-    if (!currentUser || !supabase || screen !== 'reader' || selectedVideo.sourceType !== 'youtube') {
+    if (!currentUser || screen !== 'reader' || selectedVideo.sourceType !== 'youtube') {
       return
     }
 
-    const supabaseClient = supabase
     const previousPosition = lastSavedProgressRef.current[selectedVideo.id] ?? selectedVideo.lastPositionSec ?? 0
     if (Math.abs(currentPosition - previousPosition) < 10) {
       return
@@ -1396,42 +1204,37 @@ function App() {
           return
         }
 
-        const nextVideo: DemoVideo = {
-          ...selectedVideo,
-          lastPositionSec: safePosition,
-          lastPositionLabel: safePosition > 0 ? `Continue at ${formatTime(safePosition)}` : 'Not started',
-        }
-        const { data, error } = await supabaseClient
-          .from('learning_videos')
-          .upsert(
-            {
-              ...videoToRow(nextVideo, currentUser.id, selectedVideoMeta),
-              last_watched_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'user_id,id' },
-          )
-          .select('*')
-          .maybeSingle()
-
-        if (error) {
-          setToast('Failed to save video progress.')
-          return
-        }
-
-        if (!data) {
-          setToast('Failed to save video progress.')
-          return
-        }
-
-        const updatedVideo = rowToVideo(data as LearningVideoRow)
-        lastSavedProgressRef.current[selectedVideo.id] = updatedVideo.lastPositionSec
-        setVideos((current) => current.map((video) => (video.id === updatedVideo.id ? { ...video, ...updatedVideo } : video)))
+        await persistProgress(selectedVideo.id, safePosition)
       } catch {
         setToast('Failed to save video progress.')
       }
     }, 900)
-  }, [currentPosition, currentUser, screen, selectedVideo, selectedVideoMeta])
+  }, [currentPosition, currentUser, persistProgress, screen, selectedVideo])
+
+  useEffect(() => {
+    if (!currentUser || screen !== 'reader' || selectedVideo.sourceType !== 'youtube') return
+
+    function flushProgress() {
+      const latestPosition = currentPositionRef.current
+      const lastPersistedPosition = lastSavedProgressRef.current[selectedVideo.id] ?? selectedVideo.lastPositionSec ?? 0
+      if (Math.abs(latestPosition - lastPersistedPosition) < 2) return
+      void persistProgress(selectedVideo.id, latestPosition).catch(() => {
+        setToast('Failed to save the latest video position.')
+      })
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushProgress()
+    }
+
+    if (!isPlaying) flushProgress()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', flushProgress)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', flushProgress)
+    }
+  }, [currentUser, isPlaying, persistProgress, screen, selectedVideo.id, selectedVideo.lastPositionSec, selectedVideo.sourceType])
 
   useEffect(() => {
     if (!isTemporaryReader || !guestWorkspace) {
@@ -1837,7 +1640,7 @@ function App() {
         func,
         args,
       }),
-      '*',
+      'https://www.youtube.com',
     )
   }
 
@@ -1935,6 +1738,10 @@ function App() {
   }
 
   function openAuthModal(message: string, action: PendingAction | null = null) {
+    setPreviewDiscoverId(null)
+    setShowAddModal(false)
+    setShowNoteModal(false)
+    setShowTagModal(false)
     setAuthModalMessage(message)
     setPendingAction(action)
     setAuthMode('login')
@@ -1948,23 +1755,7 @@ function App() {
   }
 
   async function postContractJson<T>(path: string, body: unknown, accessToken?: string) {
-    const response = await fetch(path, {
-      method: 'POST',
-      headers: {
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    const data = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      const error = new Error(data?.error ?? `${path} failed.`)
-      Object.assign(error, { status: response.status })
-      throw error
-    }
-
-    return data as T
+    return requestJson<T>(path, { method: 'POST', body, accessToken })
   }
 
   async function migrateGuestWorkspace(workspace: GuestWorkspace) {
@@ -2555,27 +2346,15 @@ function App() {
     segments: Record<string, string>,
     status: 'partial' | 'ready' | 'failed',
   ) {
-    if (!currentUser || !supabase) {
+    if (!currentUser) {
       throw new Error('Please log in before caching translated captions.')
     }
 
-    const { error } = await supabase
-      .from('learning_translations')
-      .upsert(
-        {
-          user_id: currentUser.id,
-          video_id: videoId,
-          language,
-          segments,
-          status,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,video_id,language' },
-      )
-
-    if (error) {
-      throw error
-    }
+    const accessToken = await getAccessToken()
+    await requestJson(
+      `/api/videos/${encodeURIComponent(videoId)}/translations/${encodeURIComponent(language)}`,
+      { method: 'PUT', body: { segments, status }, accessToken },
+    )
   }
 
   async function translateBatch(batch: TranslationBatch) {
@@ -2583,6 +2362,7 @@ function App() {
     const accessToken = await getAccessToken()
     const data = await postContractJson<{ answer?: unknown }>('/api/ask',
       {
+        purpose: 'translate',
         videoTitle: selectedVideo.title,
         videoId: selectedVideo.id,
         selectedSubtitle: {
@@ -2723,40 +2503,29 @@ function App() {
   }
 
   async function persistNote(note: SavedNote) {
-    if (!currentUser || !supabase) {
+    if (!currentUser) {
       throw new Error('Please log in before saving notes.')
     }
 
-    const { data, error } = await supabase
-      .from('learning_notes')
-      .upsert(noteToRow(note, currentUser.id), { onConflict: 'user_id,id' })
-      .select('*')
-      .single()
-
-    if (error) {
-      throw error
-    }
-
-    return rowToNote(data as LearningNoteRow)
+    const accessToken = await getAccessToken()
+    return requestJson<SavedNote>('/api/notes', {
+      method: 'POST',
+      body: { note },
+      accessToken,
+    })
   }
 
   async function persistVideoMeta(videoId: string, meta: VideoMeta) {
-    if (!currentUser || !supabase) {
+    if (!currentUser) {
       throw new Error('Please log in before updating the library.')
     }
 
-    const video = findVideoById(videos, videoId)
-    const { data, error } = await supabase
-      .from('learning_videos')
-      .upsert(videoToRow(video, currentUser.id, meta), { onConflict: 'user_id,id' })
-      .select('*')
-      .single()
-
-    if (error) {
-      throw error
-    }
-
-    return rowToVideo(data as LearningVideoRow)
+    const accessToken = await getAccessToken()
+    return requestJson<DemoVideo>(`/api/videos/${encodeURIComponent(videoId)}`, {
+      method: 'PATCH',
+      body: meta,
+      accessToken,
+    })
   }
 
   async function saveNote(source: 'highlight' | 'thought', type: NoteType = source === 'thought' ? 'thought' : 'highlight') {
@@ -3019,7 +2788,7 @@ function App() {
   }
 
   async function deleteVideo(videoId: string) {
-    if (!currentUser || !supabase) {
+    if (!currentUser) {
       setToast('Please log in before deleting videos.')
       return
     }
@@ -3048,16 +2817,11 @@ function App() {
     }
 
     try {
-      const [translationsResult, notesResult, conversationsResult, videosResult] = await Promise.all([
-        supabase.from('learning_translations').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
-        supabase.from('learning_notes').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
-        supabase.from('learning_conversations').delete().eq('user_id', currentUser.id).eq('video_id', videoId),
-        supabase.from('learning_videos').delete().eq('user_id', currentUser.id).eq('id', videoId),
-      ])
-      const error = translationsResult.error ?? notesResult.error ?? conversationsResult.error ?? videosResult.error
-      if (error) {
-        throw error
-      }
+      const accessToken = await getAccessToken()
+      await requestJson(`/api/videos/${encodeURIComponent(videoId)}`, {
+        method: 'DELETE',
+        accessToken,
+      })
       setToast('Video deleted from this workspace.')
     } catch (error) {
       setVideos(previousVideos)
@@ -3104,7 +2868,7 @@ function App() {
   }
 
   async function deleteNote(noteId: string) {
-    if (!currentUser || !supabase) {
+    if (!currentUser) {
       setToast('Please log in before deleting notes.')
       return
     }
@@ -3114,15 +2878,11 @@ function App() {
     setActiveNoteMenuId(null)
 
     try {
-      const { error } = await supabase
-        .from('learning_notes')
-        .delete()
-        .eq('user_id', currentUser.id)
-        .eq('id', noteId)
-
-      if (error) {
-        throw error
-      }
+      const accessToken = await getAccessToken()
+      await requestJson(`/api/notes/${encodeURIComponent(noteId)}`, {
+        method: 'DELETE',
+        accessToken,
+      })
       setToast('Note deleted.')
     } catch (error) {
       setSavedNotes(previousNotes)
@@ -3182,9 +2942,9 @@ function App() {
 
               <article className="chat-message chat-message--assistant">
                 <div className="chat-answer-text">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {record.answer}
-                  </ReactMarkdown>
+                  <Suspense fallback={<p>{record.answer}</p>}>
+                    <MarkdownMessage>{record.answer}</MarkdownMessage>
+                  </Suspense>
                 </div>
                 {record.citations?.length ? (
                   <div className="chat-citations" aria-label="Answer citations">
@@ -3528,7 +3288,7 @@ function App() {
           </h1>
         </div>
 
-        <nav className="sidebar__main">
+        <nav className="sidebar__main" aria-label="Primary navigation">
           <div className="sidebar__stack">
             {sidebarCollections.map((item) => {
               const Icon = item.icon
@@ -3541,6 +3301,7 @@ function App() {
                   className={`nav-link nav-link--subtle ${isSelected ? 'nav-link--selected' : ''} ${isLocked ? 'nav-link--locked' : ''}`}
                   type="button"
                   onClick={() => handleNavigate(item.screen)}
+                  aria-current={isSelected ? 'page' : undefined}
                 >
                   <Icon size={17} />
                   <span>{item.label}</span>
@@ -3567,31 +3328,21 @@ function App() {
             </div>
 
             {screen === 'library' ? (
-              <div className="tabs">
+              <div className="tabs" role="tablist" aria-label="Library status">
                 {(['inbox', 'learning', 'done', 'favourite'] as LibraryTab[]).map((tab) => (
                   <button
                     key={tab}
                     className={`tabs__item ${inboxTab === tab ? 'tabs__item--active' : ''}`}
                     type="button"
                     onClick={() => setInboxTab(tab)}
+                    role="tab"
+                    aria-selected={inboxTab === tab}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
-            ) : (
-              <div className="reader-controls">
-                <button className="icon-button icon-button--ghost" type="button" onClick={returnToLibrary}>
-                  <ArrowLeft size={18} />
-                </button>
-                <button className="icon-button icon-button--ghost" type="button">
-                  <FileText size={18} />
-                </button>
-                <button className="icon-button icon-button--ghost" type="button">
-                  <Video size={18} />
-                </button>
-              </div>
-            )}
+            ) : null}
           </div>
 
         </header>
@@ -3615,6 +3366,7 @@ function App() {
                       value={linkInput}
                       onChange={(event) => setLinkInput(event.target.value)}
                       placeholder="Paste YouTube URL..."
+                      aria-label="YouTube URL"
                       disabled={isImporting}
                     />
                     <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
@@ -3624,7 +3376,20 @@ function App() {
                 </div>
               ) : null}
               <div className="rows">
-                {visibleLibraryIds.map((videoId, index) => {
+                {visibleLibraryIds.length === 0 ? (
+                  <section className="library-empty-state" aria-labelledby="library-empty-title">
+                    <div><BookOpen size={22} /></div>
+                    <h2 id="library-empty-title">
+                      {inboxTab === 'inbox' ? 'Your Inbox is ready' : `No ${inboxTab} videos yet`}
+                    </h2>
+                    <p>
+                      {inboxTab === 'inbox'
+                        ? 'Paste a YouTube link above to create a focused learning workspace.'
+                        : 'Move a video into this view from its library menu.'}
+                    </p>
+                  </section>
+                ) : null}
+                {visibleLibraryIds.map((videoId) => {
                   const video = findVideoById(videos, videoId)
                   const isActive = video.id === selectedVideoId
                   const meta = videoMeta[video.id] ?? { status: 'inbox', isFavourite: false, tags: [] }
@@ -3638,6 +3403,16 @@ function App() {
                       className={`library-row ${isActive ? 'library-row--active' : ''}`}
                       onClick={() => handleSelectRow(video.id)}
                       onDoubleClick={() => openReader(video.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') openReader(video.id)
+                        if (event.key === ' ') {
+                          event.preventDefault()
+                          handleSelectRow(video.id)
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open ${video.title}`}
                     >
                         <div className="library-row__thumb" style={{ background: `linear-gradient(160deg, #f9f5ef, ${video.accent})` }}>
                           {video.coverImage ? <img alt={video.title} src={video.coverImage} /> : null}
@@ -3689,10 +3464,9 @@ function App() {
                         </div>
                         <div className="library-row__stats">
                           <span>Progress {progressPercent(video)}%</span>
-                          <span>Notes {Math.max(videoNotes.length, index === 0 ? 12 : 6)}</span>
-                          <span>Highlights {Math.max(highlightCount, index === 0 ? 34 : 18)}</span>
-                          <span>Questions {Math.max(questionCount, index === 0 ? 5 : 2)}</span>
-                          <span>{index === 0 ? 'today' : index === 1 ? 'today' : 'yesterday'}</span>
+                          <span>Notes {videoNotes.length}</span>
+                          <span>Highlights {highlightCount}</span>
+                          <span>Questions {questionCount}</span>
                         </div>
                         <div className="tag-row">
                           {meta.tags.length ? meta.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
@@ -3708,6 +3482,9 @@ function App() {
         ) : screen === 'reader' ? (
           <>
             <header className="reader-topbar">
+              <button className="icon-button icon-button--ghost" type="button" aria-label="Back to library" onClick={returnToLibrary}>
+                <ArrowLeft size={18} />
+              </button>
               <button
                 className="reader-topbar__brand"
                 type="button"
@@ -4028,14 +3805,13 @@ function App() {
         )}
       </section>
 
-      <AnimatePresence>
+      <>
         {transcriptSelection && !isSelectionGestureActive ? (
-          <motion.div
+          <div
             ref={selectionFloatRef}
             className="selection-float"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
+            role="toolbar"
+            aria-label="Selected transcript actions"
             style={{ left: transcriptSelection.x, top: transcriptSelection.y }}
           >
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveNote('highlight', 'highlight')}>
@@ -4054,20 +3830,19 @@ function App() {
             <button className="selection-float__ghost" type="button" onClick={clearNativeSelection}>
               <X size={16} />
             </button>
-          </motion.div>
+          </div>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {previewDiscoverItem ? (
-          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="preview-modal" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }}>
+          <AppDialog className="preview-modal" labelledBy="preview-modal-title" onClose={() => setPreviewDiscoverId(null)}>
               <div className="preview-modal__thumb" data-tone={discoveryItems.findIndex((item) => item.id === previewDiscoverItem.id) % 4}>
                 <img alt={previewDiscoverItem.title} src={previewDiscoverItem.thumbnailUrl} />
                 <span>{previewDiscoverItem.duration}</span>
               </div>
               <div className="preview-modal__body">
-                <button className="icon-button icon-button--ghost preview-modal__close" type="button" onClick={() => setPreviewDiscoverId(null)}>
+                <button className="icon-button icon-button--ghost preview-modal__close" type="button" aria-label="Close preview" onClick={() => setPreviewDiscoverId(null)}>
                   <X size={18} />
                 </button>
                 <div className="preview-modal__meta">
@@ -4075,7 +3850,7 @@ function App() {
                   <span>{previewDiscoverItem.duration}</span>
                   {previewDiscoverItem.difficulty ? <span>{previewDiscoverItem.difficulty}</span> : null}
                 </div>
-                <h3>{previewDiscoverItem.title}</h3>
+                <h3 id="preview-modal-title">{previewDiscoverItem.title}</h3>
                 <p>{previewDiscoverItem.reason}</p>
                 <section>
                   <strong>What you will learn</strong>
@@ -4141,50 +3916,47 @@ function App() {
                   )}
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
+          </AppDialog>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {showAddModal ? (
-          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.form
-              className="add-modal"
-              initial={{ opacity: 0, y: -16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              onSubmit={(event) => {
+          <AppDialog
+            className="add-modal"
+            label="Import a YouTube video"
+            onClose={() => setShowAddModal(false)}
+            as="form"
+            onSubmit={(event) => {
                 event.preventDefault()
                 void handleImportUrl()
-              }}
-            >
+            }}
+          >
               <div className="add-modal__header">
                 <input
                   value={linkInput}
                   onChange={(event) => setLinkInput(event.target.value)}
                   placeholder="Paste a YouTube URL"
+                  aria-label="YouTube URL"
                   disabled={isImporting}
                 />
                 <button className="secondary-button secondary-button--strong" type="submit" disabled={isImporting || !linkInput.trim()}>
                   {isImporting ? 'Parsing...' : 'Import video'}
                 </button>
-                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowAddModal(false)}>
+                <button className="icon-button icon-button--ghost" type="button" aria-label="Close import dialog" onClick={() => setShowAddModal(false)}>
                   {isImporting ? <span className="add-modal__spinner" /> : <X size={20} />}
                 </button>
               </div>
-            </motion.form>
-          </motion.div>
+          </AppDialog>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {showNoteModal ? (
-          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="note-modal" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
+          <AppDialog className="note-modal" labelledBy="thought-modal-title" onClose={() => setShowNoteModal(false)}>
               <div className="note-modal__header">
-                <strong>Add your thought</strong>
-                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowNoteModal(false)}>
+                <strong id="thought-modal-title">Add your thought</strong>
+                <button className="icon-button icon-button--ghost" type="button" aria-label="Close thought dialog" onClick={() => setShowNoteModal(false)}>
                   <X size={18} />
                 </button>
               </div>
@@ -4197,6 +3969,7 @@ function App() {
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
                   placeholder="Write your thought about this passage..."
+                  aria-label="Your thought"
                   rows={6}
                 />
                 <div className="note-modal__actions">
@@ -4208,18 +3981,16 @@ function App() {
                   </button>
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
+          </AppDialog>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {showTagModal && tagModalVideoId ? (
-          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="note-modal tag-modal" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}>
+          <AppDialog className="note-modal tag-modal" labelledBy="tag-modal-title" onClose={() => setShowTagModal(false)}>
               <div className="note-modal__header">
-                <strong>Edit Tags</strong>
-                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowTagModal(false)}>
+                <strong id="tag-modal-title">Edit Tags</strong>
+                <button className="icon-button icon-button--ghost" type="button" aria-label="Close tag dialog" onClick={() => setShowTagModal(false)}>
                   <X size={18} />
                 </button>
               </div>
@@ -4268,24 +4039,22 @@ function App() {
                   </button>
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
+          </AppDialog>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {showAuthModal ? (
-          <motion.div className="modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.form
-              className="auth-card auth-card--modal"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              onSubmit={handleAuthSubmit}
-            >
+          <AppDialog
+            className="auth-card auth-card--modal"
+            labelledBy="auth-modal-title"
+            onClose={() => setShowAuthModal(false)}
+            as="form"
+            onSubmit={handleAuthSubmit}
+          >
               <div className="note-modal__header">
-                <strong>{authMode === 'signup' ? 'Create account' : 'Sign in'}</strong>
-                <button className="icon-button icon-button--ghost" type="button" onClick={() => setShowAuthModal(false)}>
+                <strong id="auth-modal-title">{authMode === 'signup' ? 'Create account' : 'Sign in'}</strong>
+                <button className="icon-button icon-button--ghost" type="button" aria-label="Close authentication dialog" onClick={() => setShowAuthModal(false)}>
                   <X size={18} />
                 </button>
               </div>
@@ -4360,18 +4129,17 @@ function App() {
               <button className="secondary-button secondary-button--strong auth-submit" type="submit" disabled={isAuthBusy || !isSupabaseConfigured}>
                 {isAuthBusy ? 'Working...' : authMode === 'signup' ? 'Create account' : 'Log in'}
               </button>
-            </motion.form>
-          </motion.div>
+          </AppDialog>
         ) : null}
-      </AnimatePresence>
+      </>
 
-      <AnimatePresence>
+      <>
         {toast ? (
-          <motion.div className="toast" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 14 }}>
+          <div className="toast" role="status" aria-live="polite">
             {toast}
-          </motion.div>
+          </div>
         ) : null}
-      </AnimatePresence>
+      </>
     </main>
   )
 }
