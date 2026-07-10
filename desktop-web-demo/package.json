@@ -8,6 +8,7 @@
     "dev:api": "node server.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test",
     "start": "node server.mjs",
     "serve:full": "npm run build && node server.mjs",
     "preview": "vite preview",
@@ -21,7 +22,6 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -41,6 +41,6 @@
     "playwright-core": "^1.60.0",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
-    "vite": "^5.4.1"
+    "vite": "^6.4.3"
   }
 }
