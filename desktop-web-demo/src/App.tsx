@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  SlidersHorizontal,
   Sparkles,
   Star,
   StickyNote,
@@ -41,6 +42,8 @@ type InboxTab = 'inbox' | 'learning' | 'done'
 type LibraryTab = InboxTab | 'favourite'
 type NoteType = 'highlight' | 'thought' | 'explanation' | 'keyIdea' | 'reviewQuestion' | 'videoBrief'
 type AiNoteType = 'explanation' | 'keyIdea' | 'reviewQuestion'
+type NoteView = 'all' | 'highlights' | 'notes'
+type NoteOriginFilter = 'all' | 'manual' | 'ai'
 type VideoMeta = {
   status: InboxTab
   isFavourite: boolean
@@ -198,6 +201,13 @@ type TranslationBatch = {
   id: string
   language: string
   segments: DemoVideo['transcript']
+}
+
+function initialScreen(): Screen {
+  if (import.meta.env.DEV && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'notes') {
+    return 'notes'
+  }
+  return 'home'
 }
 
 function getAuthRedirectUrl() {
@@ -533,11 +543,11 @@ function progressPercent(video: DemoVideo) {
 function noteTypeLabel(type?: NoteType) {
   const labels: Record<NoteType, string> = {
     highlight: 'Highlight',
-    thought: 'Thought',
-    explanation: 'Explanation',
-    keyIdea: 'Key Idea',
-    reviewQuestion: 'Review Question',
-    videoBrief: 'Video Brief',
+    thought: 'Note',
+    explanation: 'AI Note',
+    keyIdea: 'AI Note',
+    reviewQuestion: 'Question',
+    videoBrief: 'Video Summary',
   }
 
   return labels[type ?? 'highlight']
@@ -546,8 +556,39 @@ function noteTypeLabel(type?: NoteType) {
 function noteTypeFromSource(note: SavedNote): NoteType {
   if (note.type) return note.type
   if (note.source === 'ai') return 'explanation'
-  if (note.source === 'thought') return 'thought'
+  if (note.source === 'thought' || note.source === 'manual') return 'thought'
   return 'highlight'
+}
+
+function noteViewKind(note: SavedNote): Exclude<NoteView, 'all'> {
+  return noteTypeFromSource(note) === 'highlight' ? 'highlights' : 'notes'
+}
+
+function noteDisplayLabel(note: SavedNote) {
+  return noteViewKind(note) === 'highlights' ? 'Highlight' : 'Note'
+}
+
+function noteContextLabel(note: SavedNote) {
+  const type = noteTypeFromSource(note)
+  if (type === 'reviewQuestion') return 'Question'
+  if (type === 'videoBrief') return 'Video summary'
+  if (type === 'keyIdea') return 'AI key idea'
+  if (type === 'explanation') return 'AI explanation'
+  if (note.source === 'ai') return 'AI'
+  if (note.source === 'highlight') return 'Subtitle'
+  return 'Manual'
+}
+
+function notePlainText(content: string) {
+  return content
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[*_~>|-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function NoteMarkdown({ children }: { children: string }) {
@@ -812,7 +853,7 @@ function App() {
   const [authModalMessage, setAuthModalMessage] = useState('登录后保存你的学习进度、笔记和 AI 对话。')
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [pendingMigratedVideoId, setPendingMigratedVideoId] = useState<string | null>(null)
-  const [screen, setScreen] = useState<Screen>('home')
+  const [screen, setScreen] = useState<Screen>(initialScreen)
   const [rightTab, setRightTab] = useState<RightTab>('info')
   const [inboxTab, setInboxTab] = useState<LibraryTab>('inbox')
   const [videos, setVideos] = useState<DemoVideo[]>(catalogVideos)
@@ -830,16 +871,18 @@ function App() {
   const [tagDraft, setTagDraft] = useState('')
   const [activeVideoMenuId, setActiveVideoMenuId] = useState<string | null>(null)
   const [activeNoteMenuId, setActiveNoteMenuId] = useState<string | null>(null)
-  const [noteTypeFilter, setNoteTypeFilter] = useState<NoteType | 'all'>('all')
+  const [noteViewFilter, setNoteViewFilter] = useState<NoteView>('all')
   const [noteVideoFilter, setNoteVideoFilter] = useState('all')
   const [noteTagFilter, setNoteTagFilter] = useState('all')
+  const [noteOriginFilter, setNoteOriginFilter] = useState<NoteOriginFilter>('all')
   const [noteStarredOnly, setNoteStarredOnly] = useState(false)
   const [noteSortOrder, setNoteSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [noteSearchQuery, setNoteSearchQuery] = useState('')
+  const [showNoteFilters, setShowNoteFilters] = useState(false)
+  const [activeNoteDetail, setActiveNoteDetail] = useState<SavedNote | null>(null)
   const [editingNote, setEditingNote] = useState<SavedNote | null>(null)
   const [editNoteDraft, setEditNoteDraft] = useState('')
   const [editNoteTagsDraft, setEditNoteTagsDraft] = useState('')
-  const [editNoteType, setEditNoteType] = useState<NoteType>('highlight')
   const [isSavingNoteEdit, setIsSavingNoteEdit] = useState(false)
   const [linkInput, setLinkInput] = useState(defaultImportUrl)
   const [chatPrompt, setChatPrompt] = useState('')
@@ -848,8 +891,6 @@ function App() {
   const [failedChatRequest, setFailedChatRequest] = useState<FailedChatRequest | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const [showTranslations, setShowTranslations] = useState(false)
-  const [aiSaveType, setAiSaveType] = useState<AiNoteType>('explanation')
-  const [activeAiSaveMenuId, setActiveAiSaveMenuId] = useState<string | null>(null)
   const [copiedChatMessageId, setCopiedChatMessageId] = useState<string | null>(null)
   const [isTranslating, setIsTranslating] = useState(false)
   const [translatedSegments, setTranslatedSegments] = useState<Record<string, string>>({})
@@ -860,6 +901,7 @@ function App() {
   const [savedNotes, setSavedNotes] = useState<SavedNote[]>([])
   const [chatRecords, setChatRecords] = useState<ChatRecord[]>([])
   const [toast, setToast] = useState<string | null>(null)
+  const [undoNoteId, setUndoNoteId] = useState<string | null>(null)
   const [transcriptSelection, setTranscriptSelection] = useState<TranscriptSelection | null>(null)
   const [isSelectionGestureActive, setIsSelectionGestureActive] = useState(false)
   const [chatContextSelection, setChatContextSelection] = useState<TranscriptSelection | null>(null)
@@ -897,6 +939,8 @@ function App() {
   const selectedNotes = savedNotes
     .filter((note) => note.videoId === selectedVideo.id)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+  const selectedVideoBrief = selectedNotes.find((note) => noteTypeFromSource(note) === 'videoBrief')
+  const selectedNotebookNotes = selectedNotes.filter((note) => noteTypeFromSource(note) !== 'videoBrief')
   const allNotes = savedNotes
   const visibleLibraryIds = libraryIds.filter((videoId) => {
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
@@ -1157,7 +1201,6 @@ function App() {
     setChatPrompt('')
     setPendingChatRequest(null)
     setFailedChatRequest(null)
-    setActiveAiSaveMenuId(null)
     setCopiedChatMessageId(null)
   }, [selectedVideoId])
 
@@ -1288,12 +1331,18 @@ function App() {
       return
     }
 
+    const isNoteSaveToast = toast === 'Highlight saved.' || toast === 'Note saved.' || toast === 'AI note saved.' || toast === 'Question saved to Notes.'
+    if (!isNoteSaveToast && undoNoteId) {
+      setUndoNoteId(null)
+    }
+
     const timer = window.setTimeout(() => {
       setToast(null)
-    }, 2400)
+      setUndoNoteId(null)
+    }, undoNoteId && isNoteSaveToast ? 5000 : 2400)
 
     return () => window.clearTimeout(timer)
-  }, [toast])
+  }, [toast, undoNoteId])
 
   useEffect(() => {
     if (!showTagModal) return
@@ -2286,7 +2335,6 @@ function App() {
 
     setRightTab('chat')
     setIsAsking(true)
-    setActiveAiSaveMenuId(null)
     setFailedChatRequest(null)
     setPendingChatRequest(pendingRequest)
     setChatPrompt('')
@@ -2522,7 +2570,6 @@ function App() {
     } else {
       setChatPrompt(selectedQuote)
     }
-    setActiveAiSaveMenuId(null)
     setRightTab('chat')
     clearNativeSelection()
     window.setTimeout(() => {
@@ -2557,7 +2604,7 @@ function App() {
     })
   }
 
-  async function saveNote(source: 'highlight' | 'thought', type: NoteType = source === 'thought' ? 'thought' : 'highlight') {
+  async function saveNote(source: 'highlight' | 'manual', type: NoteType = source === 'manual' ? 'thought' : 'highlight') {
     const noteQuote = selectedQuote
     const noteTimestamp = selectedTimestamp
 
@@ -2579,10 +2626,10 @@ function App() {
               source,
               quote: noteQuote,
               timestampLabel: noteTimestamp,
-              note: source === 'thought' ? content : '',
+              note: source === 'manual' ? content : '',
               content,
-              takeaway: source === 'thought' ? content : '',
-              tags: selectedVideoMeta.tags,
+              takeaway: source === 'manual' ? content : '',
+              tags: [],
               segmentIds: transcriptSelection?.segmentIds ?? [],
               startSec: transcriptSelection?.startSec,
               endSec: transcriptSelection?.endSec,
@@ -2591,12 +2638,12 @@ function App() {
         })
       } else if (guestWorkspace && guestWorkspace.temporaryNotes.length >= 3) {
         openAuthModal('游客最多可以临时保存 3 条 notes。登录后可以继续保存并同步到 Notes。', {
-          type: source === 'thought' ? 'add-thought' : 'save-highlight',
+          type: source === 'manual' ? 'add-thought' : 'save-highlight',
         })
         return
       }
-      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
-        type: source === 'thought' ? 'add-thought' : 'save-highlight',
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight 和手写笔记都会沉淀在这里。', {
+        type: source === 'manual' ? 'add-thought' : 'save-highlight',
       })
       return
     }
@@ -2610,11 +2657,11 @@ function App() {
       timestamp: noteTimestamp,
       note: content,
       takeaway: buildTakeaway(selectedVideo, noteQuote),
-      tags: selectedVideoMeta.tags,
+      tags: [],
       type,
       originalSubtitle: noteQuote,
       content,
-      topics: selectedVideoMeta.tags,
+      topics: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isStarred: false,
@@ -2627,17 +2674,17 @@ function App() {
     try {
       const storedNote = await persistNote(note)
       setSavedNotes((current) => [storedNote, ...current.filter((existing) => existing.id !== storedNote.id)])
+      setUndoNoteId(storedNote.id)
       void updateVideoMeta(selectedVideo.id, {
         status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
       })
       setShowNoteModal(false)
-      setActiveAiSaveMenuId(null)
       clearNativeSelection()
 
       const savedMessage =
         source === 'highlight'
-          ? 'Saved as Highlight.'
-          : 'Saved as Thought.'
+          ? 'Highlight saved.'
+          : 'Note saved.'
       setToast(savedMessage)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save note.'
@@ -2645,13 +2692,13 @@ function App() {
     }
   }
 
-  async function saveAiResponseAsNote(record: ChatRecord, type: AiNoteType = aiSaveType, candidate?: AiSaveCandidate) {
+  async function saveAiResponseAsNote(record: ChatRecord, type: AiNoteType = 'explanation', candidate?: AiSaveCandidate) {
     if (!currentUser) {
       if (guestWorkspace && guestWorkspace.temporaryNotes.length < 3) {
         const firstCitation = record.citations?.[0]
         const noteQuote = candidate?.quote || record.quote || firstCitation?.text || record.question
         const noteTimestamp = candidate?.timestamp || (firstCitation ? formatTime(firstCitation.startSec) : selectedTimestamp)
-        const noteContent = candidate?.content || record.answer
+        const noteContent = candidate?.content || notePlainText(record.answer).slice(0, 360)
         setGuestWorkspace({
           ...guestWorkspace,
           hasTemporaryNotes: true,
@@ -2663,10 +2710,10 @@ function App() {
               source: 'ai',
               quote: noteQuote,
               timestampLabel: noteTimestamp,
-              note: '',
-              content: noteContent,
-              takeaway: '',
-              tags: selectedVideoMeta.tags,
+              note: noteContent,
+              content: type === 'reviewQuestion' ? noteContent : record.answer,
+              takeaway: noteContent,
+              tags: [],
               segmentIds: firstCitation ? [firstCitation.segmentId] : transcriptSelection?.segmentIds ?? [],
               startSec: firstCitation?.startSec ?? transcriptSelection?.startSec,
               endSec: firstCitation?.endSec ?? transcriptSelection?.endSec,
@@ -2681,7 +2728,7 @@ function App() {
         })
         return
       }
-      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight 和手写笔记都会沉淀在这里。', {
         type: 'save-ai-note',
         recordId: record.id,
         noteType: type,
@@ -2692,7 +2739,7 @@ function App() {
     const firstCitation = record.citations?.[0]
     const noteQuote = candidate?.quote || record.quote || firstCitation?.text || record.question
     const noteTimestamp = candidate?.timestamp || (firstCitation ? formatTime(firstCitation.startSec) : selectedTimestamp)
-    const noteContent = candidate?.content || record.answer
+    const noteContent = candidate?.content || notePlainText(record.answer).slice(0, 360)
     const note: SavedNote = {
       id: `${selectedVideo.id}-${noteTimestamp}-${Date.now()}`,
       videoId: selectedVideo.id,
@@ -2701,11 +2748,11 @@ function App() {
       timestamp: noteTimestamp,
       note: noteContent,
       takeaway: noteContent,
-      tags: selectedVideoMeta.tags,
+      tags: [],
       type,
       originalSubtitle: noteQuote,
-      content: noteContent,
-      topics: selectedVideoMeta.tags,
+      content: type === 'reviewQuestion' ? noteContent : record.answer,
+      topics: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isStarred: false,
@@ -2718,11 +2765,11 @@ function App() {
     try {
       const storedNote = await persistNote(note)
       setSavedNotes((current) => [storedNote, ...current.filter((existing) => existing.id !== storedNote.id)])
+      setUndoNoteId(storedNote.id)
       void updateVideoMeta(selectedVideo.id, {
         status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
       })
-      setActiveAiSaveMenuId(null)
-      setToast(`Saved as ${noteTypeLabel(type)}.`)
+      setToast(type === 'reviewQuestion' ? 'Question saved to Notes.' : 'AI note saved.')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save note.'
       setToast(message)
@@ -2750,13 +2797,13 @@ function App() {
     }
   }
 
-  function openThoughtModal() {
+  function openNoteComposer() {
     if (!selectedQuote) {
       setToast('Highlight transcript text first.')
       return
     }
     if (!currentUser) {
-      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', { type: 'add-thought' })
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight 和手写笔记都会沉淀在这里。', { type: 'add-thought' })
       return
     }
     setNoteDraft('')
@@ -2876,7 +2923,7 @@ function App() {
 
   async function updateNote(noteId: string, patch: Partial<SavedNote>) {
     if (!currentUser || !supabase) {
-      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', {
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight 和手写笔记都会沉淀在这里。', {
         type: 'star-note',
         noteId,
       })
@@ -2894,20 +2941,23 @@ function App() {
     }
 
     setSavedNotes((current) => current.map((note) => (note.id === noteId ? nextNote : note)))
+    setActiveNoteDetail((current) => (current?.id === noteId ? nextNote : current))
 
     try {
       const storedNote = await persistNote(nextNote)
       setSavedNotes((current) => current.map((note) => (note.id === noteId ? storedNote : note)))
+      setActiveNoteDetail((current) => (current?.id === noteId ? storedNote : current))
       return true
     } catch (error) {
       setSavedNotes(previousNotes)
+      setActiveNoteDetail((current) => (current?.id === noteId ? targetNote : current))
       const message = error instanceof Error ? error.message : 'Failed to update note.'
       setToast(message)
       return false
     }
   }
 
-  async function deleteNote(noteId: string) {
+  async function deleteNote(noteId: string, options: { quiet?: boolean } = {}) {
     if (!currentUser) {
       setToast('Please log in before deleting notes.')
       return
@@ -2916,6 +2966,7 @@ function App() {
     const previousNotes = savedNotes
     setSavedNotes((current) => current.filter((note) => note.id !== noteId))
     setActiveNoteMenuId(null)
+    setActiveNoteDetail((current) => (current?.id === noteId ? null : current))
 
     try {
       const accessToken = await getAccessToken()
@@ -2923,7 +2974,7 @@ function App() {
         method: 'DELETE',
         accessToken,
       })
-      setToast('Note deleted.')
+      if (!options.quiet) setToast('Note deleted.')
     } catch (error) {
       setSavedNotes(previousNotes)
       const message = error instanceof Error ? error.message : 'Failed to delete note.'
@@ -2931,11 +2982,19 @@ function App() {
     }
   }
 
+  async function undoLastNoteSave() {
+    if (!undoNoteId) return
+    const noteId = undoNoteId
+    setUndoNoteId(null)
+    await deleteNote(noteId, { quiet: true })
+    setToast('Save undone.')
+  }
+
   function openNoteEditor(note: SavedNote) {
     setEditingNote(note)
-    setEditNoteDraft(note.content ?? note.note)
+    setEditNoteDraft(note.note || note.takeaway || note.content || '')
     setEditNoteTagsDraft(note.tags.join(', '))
-    setEditNoteType(noteTypeFromSource(note))
+    setActiveNoteDetail(null)
     setActiveNoteMenuId(null)
   }
 
@@ -2951,11 +3010,10 @@ function App() {
 
     setIsSavingNoteEdit(true)
     const didUpdate = await updateNote(editingNote.id, {
-      content: editNoteDraft.trim(),
+      ...(editingNote.source === 'ai' ? {} : { content: editNoteDraft.trim() }),
       note: editNoteDraft.trim(),
+      takeaway: editNoteDraft.trim(),
       tags: nextTags,
-      topics: nextTags,
-      type: editNoteType,
     })
     setIsSavingNoteEdit(false)
     if (didUpdate) {
@@ -2971,7 +3029,7 @@ function App() {
     }
 
     if (!currentUser && nextScreen === 'notes') {
-      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight、Thought 都会沉淀在这里。', { type: 'open-notes' })
+      openAuthModal('登录后保存和管理你的学习笔记。AI 回答、Highlight 和手写笔记都会沉淀在这里。', { type: 'open-notes' })
       return
     }
 
@@ -2991,6 +3049,14 @@ function App() {
 
         {selectedChatRecords.map((record) => {
           const showFollowUps = record.id === latestRecordId && (record.followUps?.length ?? 0) > 0 && !isAsking
+          const preferredNoteCandidate = record.saveCandidates?.find((candidate) => candidate.type === 'keyIdea')
+            ?? record.saveCandidates?.find((candidate) => candidate.type === 'explanation')
+          const preferredQuestionCandidate = record.saveCandidates?.find((candidate) => candidate.type === 'reviewQuestion')
+            ?? {
+              type: 'reviewQuestion' as const,
+              content: record.question,
+              quote: record.quote,
+            }
 
           return (
             <div key={record.id} className="chat-exchange">
@@ -3019,39 +3085,26 @@ function App() {
                   <button type="button" onClick={() => void copyChatAnswer(record)} title="Copy answer">
                     {copiedChatMessageId === record.id ? <Check size={15} /> : <Copy size={15} />}
                   </button>
-                  <button type="button" onClick={() => setActiveAiSaveMenuId(activeAiSaveMenuId === record.id ? null : record.id)} title="Save to Notebook">
-                    <Bookmark size={15} />
+                  <button
+                    className="chat-message-action--label"
+                    type="button"
+                    onClick={() => void saveAiResponseAsNote(record, preferredNoteCandidate?.type ?? 'explanation', preferredNoteCandidate)}
+                    title="Save as note"
+                  >
+                    <Bookmark size={15} /> Save note
+                  </button>
+                  <button
+                    className="chat-message-action--label"
+                    type="button"
+                    onClick={() => void saveAiResponseAsNote(record, 'reviewQuestion', preferredQuestionCandidate)}
+                    title="Save as question"
+                  >
+                    Question
                   </button>
                   <button type="button" onClick={() => void sendChatQuestion(record.question, { quote: record.quote ?? '', timestamp: selectedTimestamp, selectedSubtitle: null })} title="Retry question" disabled={isAsking}>
                     <RefreshCw size={15} />
                   </button>
                 </div>
-                {activeAiSaveMenuId === record.id ? (
-                  <div className="chat-save-picker">
-                    <select value={aiSaveType} onChange={(event) => setAiSaveType(event.target.value as AiNoteType)}>
-                      <option value="explanation">Explanation</option>
-                      <option value="keyIdea">Key Idea</option>
-                      <option value="reviewQuestion">Review Question</option>
-                    </select>
-                    <button type="button" onClick={() => void saveAiResponseAsNote(record, aiSaveType)}>
-                      Save full answer
-                    </button>
-                    {record.saveCandidates?.length ? (
-                      <div className="chat-save-candidates">
-                        {record.saveCandidates.map((candidate, index) => (
-                          <button
-                            key={`${record.id}-candidate-${index}`}
-                            type="button"
-                            onClick={() => void saveAiResponseAsNote(record, candidate.type, candidate)}
-                          >
-                            <strong>{noteTypeLabel(candidate.type)}</strong>
-                            <span>{candidate.content}</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
                 {showFollowUps ? (
                   <div className="chat-followups">
                     {record.followUps?.map((question) => (
@@ -3143,7 +3196,7 @@ function App() {
               <span>粘贴链接开始学习</span>
             </button>
             {recentVideos.map((video) => {
-              const videoNotes = savedNotes.filter((note) => note.videoId === video.id)
+              const videoNotes = savedNotes.filter((note) => note.videoId === video.id && noteTypeFromSource(note) !== 'videoBrief')
               return (
                 <button key={video.id} className="learning-card" type="button" onClick={() => openReader(video.id)}>
                   <div className="learning-card__thumb" style={{ background: `linear-gradient(160deg, #f9f5ef, ${video.accent})` }}>
@@ -3154,7 +3207,7 @@ function App() {
                   <small>{video.channel}</small>
                   <div className="learning-card__meta">
                     <span>Progress {progressPercent(video)}%</span>
-                    <span>{Math.max(videoNotes.length, video.id === 'jenny-design' ? 8 : 3)} notes</span>
+                    <span>{videoNotes.length} notes</span>
                   </div>
                 </button>
               )
@@ -3197,24 +3250,23 @@ function App() {
   }
 
   function renderNotesPage() {
-    const noteTabs: Array<{ label: string; type: NoteType | 'all' }> = [
-      { label: 'All Notes', type: 'all' },
-      { label: 'Highlights', type: 'highlight' },
-      { label: 'Thoughts', type: 'thought' },
-      { label: 'Explanations', type: 'explanation' },
-      { label: 'Key Ideas', type: 'keyIdea' },
-      { label: 'Review Questions', type: 'reviewQuestion' },
+    const noteTabs: Array<{ label: string; view: NoteView }> = [
+      { label: 'All', view: 'all' },
+      { label: 'Highlights', view: 'highlights' },
+      { label: 'Notes', view: 'notes' },
     ]
-    const sourceNotes = currentUser ? allNotes : demoNotebookNotes
+    const sourceNotes = (currentUser ? allNotes : demoNotebookNotes)
+      .filter((note) => noteTypeFromSource(note) !== 'videoBrief')
     const noteVideoOptions = Array.from(
       new Map(sourceNotes.map((note) => [note.videoId, note.videoTitle ?? findVideoById(videos, note.videoId).title])).entries(),
     )
     const noteTagOptions = Array.from(new Set(sourceNotes.flatMap((note) => note.tags))).sort((a, b) => a.localeCompare(b))
     const normalizedNoteSearch = noteSearchQuery.trim().toLocaleLowerCase()
     const visibleNotes = sourceNotes
-      .filter((note) => noteTypeFilter === 'all' || noteTypeFromSource(note) === noteTypeFilter)
+      .filter((note) => noteViewFilter === 'all' || noteViewKind(note) === noteViewFilter)
       .filter((note) => noteVideoFilter === 'all' || note.videoId === noteVideoFilter)
       .filter((note) => noteTagFilter === 'all' || note.tags.includes(noteTagFilter))
+      .filter((note) => noteOriginFilter === 'all' || (noteOriginFilter === 'ai' ? note.source === 'ai' : note.source !== 'ai'))
       .filter((note) => !noteStarredOnly || note.isStarred)
       .filter((note) => {
         if (!normalizedNoteSearch) return true
@@ -3225,136 +3277,315 @@ function App() {
           note.note,
           note.takeaway,
           note.videoTitle,
-          noteTypeLabel(noteTypeFromSource(note)),
+          noteDisplayLabel(note),
+          noteContextLabel(note),
           ...note.tags,
         ].some((value) => value?.toLocaleLowerCase().includes(normalizedNoteSearch))
       })
       .sort((a, b) => {
-        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
-        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        const aTime = a.updatedAt || a.createdAt ? new Date(a.updatedAt ?? a.createdAt ?? 0).getTime() : 0
+        const bTime = b.updatedAt || b.createdAt ? new Date(b.updatedAt ?? b.createdAt ?? 0).getTime() : 0
 
         return noteSortOrder === 'newest' ? bTime - aTime : aTime - bTime
       })
+    const activeFilterCount = Number(noteVideoFilter !== 'all')
+      + Number(noteTagFilter !== 'all')
+      + Number(noteOriginFilter !== 'all')
+      + Number(noteStarredOnly)
+      + Number(noteSortOrder !== 'newest')
+    const detailSummary = activeNoteDetail?.note || activeNoteDetail?.takeaway || activeNoteDetail?.content || ''
+    const detailFullContent = activeNoteDetail?.content || detailSummary
+    const hasSeparateAiAnswer = Boolean(
+      activeNoteDetail?.source === 'ai'
+      && detailSummary
+      && detailFullContent
+      && detailSummary !== detailFullContent,
+    )
+
+    function clearAdvancedNoteFilters() {
+      setNoteTagFilter('all')
+      setNoteOriginFilter('all')
+      setNoteStarredOnly(false)
+      setNoteSortOrder('newest')
+    }
+
+    function clearAllNoteFilters() {
+      setNoteVideoFilter('all')
+      clearAdvancedNoteFilters()
+    }
 
     return (
-      <div className="page-shell">
-        <div className="page-title">
-          <h2>Notes 全局笔记</h2>
-        </div>
-        <div className="page-tabs">
-          {noteTabs.map((tab) => (
-            <button
-              key={tab.label}
-              className={`tabs__item tabs__item--soft ${noteTypeFilter === tab.type ? 'tabs__item--active' : ''}`}
-              type="button"
-              onClick={() => setNoteTypeFilter(tab.type)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="note-filter-bar">
-          <label className="note-search-control">
-            <Search size={17} />
-            <input
-              type="search"
-              value={noteSearchQuery}
-              onChange={(event) => setNoteSearchQuery(event.target.value)}
-              placeholder="Search notes"
-              aria-label="Search notes"
-            />
-          </label>
-          <label className="note-filter-control">
-            <span>Video:</span>
-            <select value={noteVideoFilter} onChange={(event) => setNoteVideoFilter(event.target.value)}>
-              <option value="all">All Videos</option>
-              {noteVideoOptions.map(([videoId, videoTitle]) => (
-                <option key={videoId} value={videoId}>{videoTitle}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} />
-          </label>
-          <label className="note-filter-control">
-            <span>Tag:</span>
-            <select value={noteTagFilter} onChange={(event) => setNoteTagFilter(event.target.value)}>
-              <option value="all">All Tags</option>
-              {noteTagOptions.map((tag) => (
-                <option key={tag} value={tag}>{tag}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} />
-          </label>
-          <label className="note-filter-check">
-            <input
-              type="checkbox"
-              checked={noteStarredOnly}
-              onChange={(event) => setNoteStarredOnly(event.target.checked)}
-            />
-            <span>Starred only</span>
-          </label>
-          <label className="note-filter-control">
-            <span>Sort:</span>
-            <select value={noteSortOrder} onChange={(event) => setNoteSortOrder(event.target.value as 'newest' | 'oldest')}>
-              <option value="newest">Newest</option>
-              <option value="oldest">Oldest</option>
-            </select>
-            <ChevronDown size={16} />
-          </label>
-        </div>
-        <div className="global-note-list global-note-list--waterfall">
-          {visibleNotes.map((note) => {
-            const noteType = noteTypeFromSource(note)
-            const isHighlight = noteType === 'highlight'
+      <>
+        <div className="page-shell notes-page">
+          <div className="page-title notes-page__title">
+            <div>
+              <h2>Notes</h2>
+              <p>从视频里留下的重要内容</p>
+            </div>
+            <span>{visibleNotes.length} {visibleNotes.length === 1 ? 'item' : 'items'}</span>
+          </div>
 
-            return (
-              <article key={note.id} className="global-note-card">
-                <div className="global-note-card__top">
-                  <span>{noteTypeLabel(noteType)} · {note.timestamp}</span>
-                  <button
-                    className="icon-button icon-button--ghost"
-                    type="button"
-                    aria-label="Note menu"
-                    onClick={() => setActiveNoteMenuId((current) => (current === note.id ? null : note.id))}
-                  >
-                    <MoreHorizontal size={18} />
-                  </button>
-                  {activeNoteMenuId === note.id ? (
-                    <div className="row-menu row-menu--note">
-                      <button type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>Open at note</button>
-                      <button type="button" onClick={() => openNoteEditor(note)}>Edit</button>
-                      <button type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
-                    </div>
-                  ) : null}
-                </div>
-                {note.originalSubtitle || note.quote ? <blockquote>{note.originalSubtitle ?? note.quote}</blockquote> : null}
-                {!isHighlight ? <NoteMarkdown>{note.content ?? note.takeaway ?? note.note}</NoteMarkdown> : null}
-                <button className="global-note-card__source" type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>
-                  {note.videoTitle ?? findVideoById(videos, note.videoId).title}
-                </button>
-                <footer className="global-note-card__footer">
-                  <div className="tag-row tag-row--compact global-note-card__tags">
-                    {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
-                  </div>
-                  <button
-                    className={`note-like-button ${note.isStarred ? 'note-like-button--active' : ''}`}
-                    type="button"
-                    aria-label={note.isStarred ? 'Unstar note' : 'Star note'}
-                    onClick={() => void updateNote(note.id, { isStarred: !note.isStarred })}
-                  >
-                    <Star size={15} fill={note.isStarred ? 'currentColor' : 'none'} />
-                  </button>
-                </footer>
-              </article>
-            )
-          })}
-          {!visibleNotes.length ? (
-            <div className="empty-card global-note-empty">
-              <strong>No matching notes</strong>
-              <p>Try another search term or clear one of the filters.</p>
+          <div className="page-tabs notes-page__tabs" aria-label="Note categories">
+            {noteTabs.map((tab) => (
+              <button
+                key={tab.view}
+                className={`tabs__item tabs__item--soft ${noteViewFilter === tab.view ? 'tabs__item--active' : ''}`}
+                type="button"
+                onClick={() => setNoteViewFilter(tab.view)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="note-toolbar">
+            <label className="note-search-control">
+              <Search size={18} />
+              <input
+                type="search"
+                value={noteSearchQuery}
+                onChange={(event) => setNoteSearchQuery(event.target.value)}
+                placeholder="Search notes"
+                aria-label="Search notes"
+              />
+            </label>
+            <label className="note-video-control">
+              <BookOpen size={17} />
+              <select value={noteVideoFilter} onChange={(event) => setNoteVideoFilter(event.target.value)} aria-label="Filter notes by video">
+                <option value="all">All videos</option>
+                {noteVideoOptions.map(([videoId, videoTitle]) => (
+                  <option key={videoId} value={videoId}>{videoTitle}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} />
+            </label>
+            <button
+              className={`note-filter-trigger ${activeFilterCount ? 'note-filter-trigger--active' : ''}`}
+              type="button"
+              aria-haspopup="dialog"
+              onClick={() => setShowNoteFilters(true)}
+            >
+              <SlidersHorizontal size={17} />
+              Filters{activeFilterCount ? ` · ${activeFilterCount}` : ''}
+            </button>
+          </div>
+
+          {activeFilterCount ? (
+            <div className="note-active-filters" aria-label="Active note filters">
+              {noteVideoFilter !== 'all' ? (
+                <button type="button" onClick={() => setNoteVideoFilter('all')}><span>Video: {noteVideoOptions.find(([videoId]) => videoId === noteVideoFilter)?.[1] ?? 'Selected'}</span> <X size={13} /></button>
+              ) : null}
+              {noteTagFilter !== 'all' ? (
+                <button type="button" onClick={() => setNoteTagFilter('all')}>Tag: {noteTagFilter} <X size={13} /></button>
+              ) : null}
+              {noteOriginFilter !== 'all' ? (
+                <button type="button" onClick={() => setNoteOriginFilter('all')}>{noteOriginFilter === 'ai' ? 'AI' : 'Manual'} <X size={13} /></button>
+              ) : null}
+              {noteStarredOnly ? (
+                <button type="button" onClick={() => setNoteStarredOnly(false)}>Starred <X size={13} /></button>
+              ) : null}
+              {noteSortOrder === 'oldest' ? (
+                <button type="button" onClick={() => setNoteSortOrder('newest')}>Oldest first <X size={13} /></button>
+              ) : null}
+              <button className="note-active-filters__clear" type="button" onClick={clearAllNoteFilters}>Clear all</button>
             </div>
           ) : null}
+
+          <div className="global-note-list global-note-list--grid">
+            {visibleNotes.map((note) => {
+              const isHighlight = noteViewKind(note) === 'highlights'
+              const quote = note.originalSubtitle ?? note.quote
+              const summary = notePlainText(note.note || note.takeaway || note.content || '')
+              const visibleTags = note.tags.slice(0, 2)
+
+              return (
+                <article
+                  key={note.id}
+                  className={`global-note-card ${activeNoteMenuId === note.id ? 'global-note-card--menu-open' : ''}`}
+                  data-kind={isHighlight ? 'highlight' : 'note'}
+                >
+                  <div className="global-note-card__top">
+                    <div className="global-note-card__identity">
+                      <strong>{noteDisplayLabel(note)}</strong>
+                      <span>{noteContextLabel(note)}</span>
+                      <span>{note.timestamp}</span>
+                    </div>
+                    <button
+                      className="icon-button icon-button--ghost"
+                      type="button"
+                      aria-label="Note menu"
+                      aria-expanded={activeNoteMenuId === note.id}
+                      onClick={() => setActiveNoteMenuId((current) => (current === note.id ? null : note.id))}
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
+                    {activeNoteMenuId === note.id ? (
+                      <div className="row-menu row-menu--note">
+                        <button type="button" onClick={() => { setActiveNoteDetail(note); setActiveNoteMenuId(null) }}>View details</button>
+                        <button type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>Open at note</button>
+                        <button type="button" onClick={() => openNoteEditor(note)}>Edit</button>
+                        <button type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <button className="global-note-card__preview" type="button" onClick={() => setActiveNoteDetail(note)} aria-label={`Open ${noteDisplayLabel(note).toLowerCase()} details`}>
+                    {quote ? <span className="global-note-card__quote">{quote}</span> : null}
+                    {!isHighlight && summary ? <span className="global-note-card__summary">{summary}</span> : null}
+                    <span className="global-note-card__view">View details</span>
+                  </button>
+
+                  <footer className="global-note-card__footer">
+                    <button className="global-note-card__source" type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>
+                      {note.videoTitle ?? findVideoById(videos, note.videoId).title}
+                    </button>
+                    <div className="global-note-card__footer-row">
+                      <div className="tag-row tag-row--compact global-note-card__tags">
+                        {visibleTags.map((tag) => <span key={tag}>{tag}</span>)}
+                        {note.tags.length > visibleTags.length ? <span>+{note.tags.length - visibleTags.length}</span> : null}
+                      </div>
+                      <button
+                        className={`note-like-button ${note.isStarred ? 'note-like-button--active' : ''}`}
+                        type="button"
+                        aria-label={note.isStarred ? 'Unstar note' : 'Star note'}
+                        onClick={() => void updateNote(note.id, { isStarred: !note.isStarred })}
+                      >
+                        <Star size={15} fill={note.isStarred ? 'currentColor' : 'none'} />
+                      </button>
+                    </div>
+                  </footer>
+                </article>
+              )
+            })}
+            {!visibleNotes.length ? (
+              <div className="empty-card global-note-empty">
+                <strong>No matching notes</strong>
+                <p>Try another search term or clear the current filters.</p>
+                <button className="secondary-button" type="button" onClick={() => { setNoteSearchQuery(''); clearAllNoteFilters() }}>
+                  Clear filters
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
+
+        {showNoteFilters ? (
+          <AppDialog
+            className="note-filter-drawer"
+            backdropClassName="modal-backdrop--drawer"
+            labelledBy="note-filter-drawer-title"
+            onClose={() => setShowNoteFilters(false)}
+          >
+            <div className="note-drawer__header">
+              <div>
+                <span>Refine this view</span>
+                <strong id="note-filter-drawer-title">Filters</strong>
+              </div>
+              <button className="icon-button icon-button--ghost" type="button" aria-label="Close filters" onClick={() => setShowNoteFilters(false)}>
+                <X size={19} />
+              </button>
+            </div>
+            <div className="note-filter-drawer__body">
+              <label className="note-drawer-field note-drawer-field--mobile-video">
+                <span>Video</span>
+                <select value={noteVideoFilter} onChange={(event) => setNoteVideoFilter(event.target.value)}>
+                  <option value="all">All videos</option>
+                  {noteVideoOptions.map(([videoId, videoTitle]) => <option key={videoId} value={videoId}>{videoTitle}</option>)}
+                </select>
+              </label>
+              <label className="note-drawer-field">
+                <span>Tag</span>
+                <select value={noteTagFilter} onChange={(event) => setNoteTagFilter(event.target.value)}>
+                  <option value="all">All tags</option>
+                  {noteTagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </label>
+              <label className="note-drawer-field">
+                <span>Created by</span>
+                <select value={noteOriginFilter} onChange={(event) => setNoteOriginFilter(event.target.value as NoteOriginFilter)}>
+                  <option value="all">Anyone</option>
+                  <option value="manual">Me</option>
+                  <option value="ai">AI</option>
+                </select>
+              </label>
+              <label className="note-drawer-check">
+                <input type="checkbox" checked={noteStarredOnly} onChange={(event) => setNoteStarredOnly(event.target.checked)} />
+                <span><strong>Starred only</strong><small>Show the notes you marked as important.</small></span>
+              </label>
+              <label className="note-drawer-field">
+                <span>Order</span>
+                <select value={noteSortOrder} onChange={(event) => setNoteSortOrder(event.target.value as 'newest' | 'oldest')}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </label>
+            </div>
+            <div className="note-drawer__actions">
+              <button className="secondary-button" type="button" onClick={clearAllNoteFilters} disabled={!activeFilterCount}>Reset</button>
+              <button className="secondary-button secondary-button--strong" type="button" onClick={() => setShowNoteFilters(false)}>Show notes</button>
+            </div>
+          </AppDialog>
+        ) : null}
+
+        {activeNoteDetail ? (
+          <AppDialog
+            className="note-detail-drawer"
+            backdropClassName="modal-backdrop--drawer"
+            labelledBy="note-detail-title"
+            onClose={() => setActiveNoteDetail(null)}
+          >
+            <div className="note-drawer__header">
+              <div>
+                <span>{noteDisplayLabel(activeNoteDetail)} · {noteContextLabel(activeNoteDetail)}</span>
+                <strong id="note-detail-title">Note details</strong>
+              </div>
+              <button className="icon-button icon-button--ghost" type="button" aria-label="Close note details" onClick={() => setActiveNoteDetail(null)}>
+                <X size={19} />
+              </button>
+            </div>
+            <div className="note-detail-drawer__body">
+              <button className="note-detail-time" type="button" onClick={() => { const note = activeNoteDetail; setActiveNoteDetail(null); openReader(note.videoId, noteStartTime(note)) }}>
+                {activeNoteDetail.timestamp} · Open in video
+              </button>
+              {activeNoteDetail.originalSubtitle || activeNoteDetail.quote ? (
+                <blockquote>{activeNoteDetail.originalSubtitle ?? activeNoteDetail.quote}</blockquote>
+              ) : null}
+              {noteViewKind(activeNoteDetail) === 'notes' ? (
+                <section className="note-detail-section">
+                  <span>{hasSeparateAiAnswer ? 'Saved note' : noteContextLabel(activeNoteDetail)}</span>
+                  <NoteMarkdown>{detailSummary}</NoteMarkdown>
+                </section>
+              ) : null}
+              {hasSeparateAiAnswer ? (
+                <section className="note-detail-section note-detail-section--answer">
+                  <span>Original AI answer</span>
+                  <NoteMarkdown>{detailFullContent}</NoteMarkdown>
+                </section>
+              ) : null}
+              <section className="note-detail-section">
+                <span>Source</span>
+                <button className="note-detail-source" type="button" onClick={() => { const note = activeNoteDetail; setActiveNoteDetail(null); openReader(note.videoId, noteStartTime(note)) }}>
+                  <BookOpen size={17} />
+                  <span>{activeNoteDetail.videoTitle ?? findVideoById(videos, activeNoteDetail.videoId).title}</span>
+                </button>
+              </section>
+              {activeNoteDetail.tags.length ? (
+                <section className="note-detail-section">
+                  <span>Tags</span>
+                  <div className="tag-row tag-row--compact">{activeNoteDetail.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+                </section>
+              ) : null}
+            </div>
+            <div className="note-drawer__actions note-detail-drawer__actions">
+              <button className={`note-like-button ${activeNoteDetail.isStarred ? 'note-like-button--active' : ''}`} type="button" aria-label={activeNoteDetail.isStarred ? 'Unstar note' : 'Star note'} onClick={() => void updateNote(activeNoteDetail.id, { isStarred: !activeNoteDetail.isStarred })}>
+                <Star size={16} fill={activeNoteDetail.isStarred ? 'currentColor' : 'none'} />
+              </button>
+              <button className="secondary-button" type="button" onClick={() => openNoteEditor(activeNoteDetail)}>Edit</button>
+              <button className="text-button note-delete-button" type="button" onClick={() => void deleteNote(activeNoteDetail.id)}>Delete</button>
+            </div>
+          </AppDialog>
+        ) : null}
+      </>
     )
   }
 
@@ -3484,7 +3715,7 @@ function App() {
                   const video = findVideoById(videos, videoId)
                   const isActive = video.id === selectedVideoId
                   const meta = videoMeta[video.id] ?? { status: 'inbox', isFavourite: false, tags: [] }
-                  const videoNotes = savedNotes.filter((note) => note.videoId === video.id)
+                  const videoNotes = savedNotes.filter((note) => note.videoId === video.id && noteTypeFromSource(note) !== 'videoBrief')
                   const highlightCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length
                   const questionCount = videoNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length
 
@@ -3672,7 +3903,7 @@ function App() {
                         onClick={() => setRightTab(tab)}
                       >
                         {tab.toUpperCase()}
-                        {tab === 'note' ? <span>{selectedNotes.length}</span> : null}
+                        {tab === 'note' ? <span>{selectedNotebookNotes.length}</span> : null}
                       </button>
                       {tab === 'info' ? (
                         <button
@@ -3704,7 +3935,9 @@ function App() {
 
                   <section className="meta-section">
                     <p>Summary</p>
-                    <div className="summary-card">{buildSummary(selectedVideo)}</div>
+                    <div className="summary-card">
+                      {selectedVideoBrief ? <NoteMarkdown>{selectedVideoBrief.note || selectedVideoBrief.content || selectedVideoBrief.takeaway}</NoteMarkdown> : buildSummary(selectedVideo)}
+                    </div>
                   </section>
 
                   <section className="meta-section">
@@ -3714,9 +3947,9 @@ function App() {
                       <div><dt>Domain</dt><dd>{getHostnameLabel(selectedVideo.youtubeUrl)}</dd></div>
                       <div><dt>Length</dt><dd>{selectedVideo.durationLabel}</dd></div>
                       <div><dt>Progress</dt><dd>{Math.min(Math.round((currentPosition / selectedVideo.durationSec) * 100), 100)}%</dd></div>
-                      <div><dt>Notes</dt><dd>{selectedNotes.length}</dd></div>
-                      <div><dt>Highlights</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</dd></div>
-                      <div><dt>Questions</dt><dd>{selectedNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</dd></div>
+                      <div><dt>Notes</dt><dd>{selectedNotebookNotes.length}</dd></div>
+                      <div><dt>Highlights</dt><dd>{selectedNotebookNotes.filter((note) => noteTypeFromSource(note) === 'highlight').length}</dd></div>
+                      <div><dt>Questions</dt><dd>{selectedNotebookNotes.filter((note) => noteTypeFromSource(note) === 'reviewQuestion').length}</dd></div>
                     </dl>
                   </section>
 
@@ -3736,8 +3969,8 @@ function App() {
                   </section>
 
                   <div className="note-stack">
-                    {selectedNotes.length ? (
-                      selectedNotes.map((note) => (
+                    {selectedNotebookNotes.length ? (
+                      selectedNotebookNotes.map((note) => (
                         <article key={note.id} className="note-card">
                           <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
                           <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
@@ -3906,10 +4139,10 @@ function App() {
             style={{ left: transcriptSelection.x, top: transcriptSelection.y }}
           >
             <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveNote('highlight', 'highlight')}>
-              Save to Notebook
+              Highlight
             </button>
-            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={openThoughtModal}>
-              Add Thought
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={openNoteComposer}>
+              Add note
             </button>
             <button
               type="button"
@@ -4046,8 +4279,8 @@ function App() {
         {showNoteModal ? (
           <AppDialog className="note-modal" labelledBy="thought-modal-title" onClose={() => setShowNoteModal(false)}>
               <div className="note-modal__header">
-                <strong id="thought-modal-title">Add your thought</strong>
-                <button className="icon-button icon-button--ghost" type="button" aria-label="Close thought dialog" onClick={() => setShowNoteModal(false)}>
+                <strong id="thought-modal-title">Add note</strong>
+                <button className="icon-button icon-button--ghost" type="button" aria-label="Close note composer" onClick={() => setShowNoteModal(false)}>
                   <X size={18} />
                 </button>
               </div>
@@ -4059,16 +4292,16 @@ function App() {
                 <textarea
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
-                  placeholder="Write your thought about this passage..."
-                  aria-label="Your thought"
+                  placeholder="Write what you want to remember..."
+                  aria-label="Note"
                   rows={6}
                 />
                 <div className="note-modal__actions">
                   <button className="secondary-button" type="button" onClick={() => setShowNoteModal(false)}>
                     Cancel
                   </button>
-                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('thought', 'thought')}>
-                    Save Thought
+                  <button className="secondary-button secondary-button--strong" type="button" onClick={() => void saveNote('manual', 'thought')} disabled={!noteDraft.trim()}>
+                    Save note
                   </button>
                 </div>
               </div>
@@ -4099,17 +4332,6 @@ function App() {
                 <span>{editingNote.timestamp}</span>
                 <blockquote>{editingNote.originalSubtitle ?? editingNote.quote}</blockquote>
               </div>
-              <label className="note-editor-field">
-                <span>Type</span>
-                <select value={editNoteType} onChange={(event) => setEditNoteType(event.target.value as NoteType)}>
-                  <option value="highlight">Highlight</option>
-                  <option value="thought">Thought</option>
-                  <option value="explanation">Explanation</option>
-                  <option value="keyIdea">Key Idea</option>
-                  <option value="reviewQuestion">Review Question</option>
-                  <option value="videoBrief">Video Brief</option>
-                </select>
-              </label>
               <label className="note-editor-field">
                 <span>Content</span>
                 <textarea
@@ -4292,7 +4514,8 @@ function App() {
       <>
         {toast ? (
           <div className="toast" role="status" aria-live="polite">
-            {toast}
+            <span>{toast}</span>
+            {undoNoteId ? <button type="button" onClick={() => void undoLastNoteSave()}>Undo</button> : null}
           </div>
         ) : null}
       </>

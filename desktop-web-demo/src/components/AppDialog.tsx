@@ -3,6 +3,7 @@ import { useEffect, useRef, type FormEventHandler, type ReactNode } from 'react'
 type AppDialogProps = {
   children: ReactNode
   className: string
+  backdropClassName?: string
   labelledBy?: string
   label?: string
   onClose: () => void
@@ -22,6 +23,7 @@ const focusableSelector = [
 export default function AppDialog({
   children,
   className,
+  backdropClassName,
   labelledBy,
   label,
   onClose,
@@ -81,7 +83,7 @@ export default function AppDialog({
 
   return (
     <div
-      className="modal-backdrop"
+      className={['modal-backdrop', backdropClassName].filter(Boolean).join(' ')}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}

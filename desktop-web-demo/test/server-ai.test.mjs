@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildTranscriptContext, parseStructuredAiResponse } from '../server.mjs'
+import { buildTranscriptContext, normalizeGuestNote, normalizeSaveCandidates, parseStructuredAiResponse } from '../server.mjs'
 
 test('long transcripts are bounded and keep question-relevant context', () => {
   const transcript = Array.from({ length: 120 }, (_, index) => ({
@@ -38,4 +38,29 @@ test('structured AI responses tolerate fenced JSON and normalize missing values'
   assert.deepEqual(parsed.timestamps, ['01:10'])
   assert.deepEqual(parsed.followUps, ['Why?'])
   assert.deepEqual(parsed.saveCandidates, [])
+})
+
+test('AI save candidates stay concise enough for note summaries', () => {
+  const [note, question] = normalizeSaveCandidates([
+    { type: 'keyIdea', content: 'A'.repeat(900) },
+    { type: 'reviewQuestion', content: 'Q'.repeat(500) },
+  ])
+
+  assert.equal(note.content.length, 520)
+  assert.equal(question.content.length, 280)
+})
+
+test('guest migration preserves an explicit manual note source', () => {
+  const note = normalizeGuestNote({
+    clientTempId: 'manual-note',
+    type: 'thought',
+    source: 'manual',
+    quote: 'Selected subtitle',
+    note: 'My note',
+    content: 'My note',
+    tags: [],
+  }, 0, '00000000-0000-0000-0000-000000000001', { id: 'video-1', title: 'Video' })
+
+  assert.equal(note.source, 'manual')
+  assert.equal(note.type, 'thought')
 })

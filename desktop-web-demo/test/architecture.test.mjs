@@ -77,3 +77,21 @@ test('notes support typed guest saves, search, markdown, and an accessible edito
   assert.match(appSource, /labelledBy="note-editor-title"/)
   assert.doesNotMatch(appSource, /window\.prompt/)
 })
+
+test('the Notes workspace exposes a simple taxonomy and bounded detail flow', async () => {
+  const [appSource, cssSource] = await Promise.all([
+    readFile(path.join(appRoot, 'src/App.tsx'), 'utf8'),
+    readFile(path.join(appRoot, 'src/App.css'), 'utf8'),
+  ])
+
+  assert.match(appSource, /\{ label: 'All', view: 'all' \}/)
+  assert.match(appSource, /\{ label: 'Highlights', view: 'highlights' \}/)
+  assert.match(appSource, /\{ label: 'Notes', view: 'notes' \}/)
+  assert.doesNotMatch(appSource, /label: 'Thoughts'|label: 'Explanations'|label: 'Key Ideas'|label: 'Review Questions'/)
+  assert.match(appSource, /note-filter-trigger/)
+  assert.match(appSource, /className="note-detail-drawer"/)
+  assert.match(appSource, /source === 'thought' \|\| note\.source === 'manual'/)
+  assert.match(cssSource, /\.global-note-list--grid[\s\S]*grid-template-columns: repeat\(2/)
+  assert.match(cssSource, /\.global-note-card[\s\S]*height: 270px/)
+  assert.doesNotMatch(cssSource, /columns:\s*3\s+280px/)
+})

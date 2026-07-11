@@ -425,10 +425,11 @@ function normalizeGuestNote(note, index, userId, video) {
   const type = ['highlight', 'thought', 'explanation', 'keyIdea', 'reviewQuestion', 'videoBrief'].includes(rawType)
     ? rawType
     : 'explanation'
-  const source = type === 'thought'
-    ? 'thought'
-    : ['manual', 'ai', 'highlight', 'thought'].includes(String(note.source ?? '').trim())
-      ? String(note.source).trim()
+  const explicitSource = String(note.source ?? '').trim()
+  const source = ['manual', 'ai', 'highlight', 'thought'].includes(explicitSource)
+    ? explicitSource
+    : type === 'thought'
+      ? 'thought'
       : type === 'highlight'
         ? 'highlight'
         : 'ai'
@@ -954,7 +955,7 @@ function normalizeSaveCandidates(saveCandidates) {
       if (!allowedTypes.has(type) || !content) return []
       return [{
         type,
-        content: content.slice(0, 1600),
+        content: content.slice(0, type === 'reviewQuestion' ? 280 : 520),
         quote: String(candidate.quote ?? '').replace(/\s+/g, ' ').trim().slice(0, 600),
         timestamp: String(candidate.timestamp ?? '').trim().slice(0, 16),
       }]
@@ -1733,7 +1734,8 @@ app.post('/api/ask', validateAskBody, askGlobalLimiter, optionalAuth, askIdentit
           'Return strict JSON only. Do not wrap the JSON in Markdown code fences.',
           'JSON shape: {"answer":"string","timestamps":["MM:SS"],"followUps":["string"],"saveCandidates":[{"type":"explanation|keyIdea|reviewQuestion","content":"string","quote":"string","timestamp":"MM:SS"}]}.',
           'Return 1-5 timestamps that best support the answer. Use timestamps that appear in, or are strongly supported by, the transcript.',
-          'Explanation, keyIdea, and reviewQuestion are note types, not tags.',
+          'Return one concise keyIdea or explanation candidate suitable for a short saved note, plus one reviewQuestion candidate when useful.',
+          'Keep note candidates under 520 characters and review questions under 280 characters. These types are internal metadata, not user-facing categories or tags.',
         ].join(' '),
       },
       {
@@ -1843,7 +1845,7 @@ app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'))
 })
 
-export { app, buildTranscriptContext, parseStructuredAiResponse }
+export { app, buildTranscriptContext, normalizeGuestNote, normalizeSaveCandidates, parseStructuredAiResponse }
 
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isDirectRun) {
