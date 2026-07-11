@@ -14,11 +14,11 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Sparkles,
   Star,
   StickyNote,
-  ThumbsUp,
   X,
 } from 'lucide-react'
 import './App.css'
@@ -81,7 +81,7 @@ type TemporaryChatRecord = {
 
 type TemporaryNote = {
   clientTempId: string
-  type: AiNoteType
+  type: NoteType
   source: 'ai' | 'thought' | 'highlight' | 'manual'
   quote: string
   timestampLabel: string
@@ -89,6 +89,9 @@ type TemporaryNote = {
   content: string
   takeaway: string
   tags: string[]
+  segmentIds: string[]
+  startSec?: number
+  endSec?: number
 }
 
 type GuestWorkspace = {
@@ -129,6 +132,9 @@ type SavedNote = {
   updatedAt?: string
   savedAt?: string
   isStarred?: boolean
+  segmentIds?: string[]
+  startSec?: number
+  endSec?: number
   source: 'thought' | 'manual' | 'ai' | 'highlight'
 }
 
@@ -465,6 +471,13 @@ function formatTime(seconds: number) {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
+function noteStartTime(note: SavedNote) {
+  if (note.startSec != null) return note.startSec
+  const [minutes = '0', seconds = '0'] = note.timestamp.split(':')
+  const parsed = Number(minutes) * 60 + Number(seconds)
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+}
+
 function videoById(id: string) {
   return catalogVideos.find((video) => video.id === id) ?? catalogVideos[0]
 }
@@ -535,6 +548,16 @@ function noteTypeFromSource(note: SavedNote): NoteType {
   if (note.source === 'ai') return 'explanation'
   if (note.source === 'thought') return 'thought'
   return 'highlight'
+}
+
+function NoteMarkdown({ children }: { children: string }) {
+  return (
+    <div className="note-markdown">
+      <Suspense fallback={<p>{children}</p>}>
+        <MarkdownMessage>{children}</MarkdownMessage>
+      </Suspense>
+    </div>
+  )
 }
 
 function initialVideoMeta(videos: DemoVideo[]) {
@@ -812,6 +835,12 @@ function App() {
   const [noteTagFilter, setNoteTagFilter] = useState('all')
   const [noteStarredOnly, setNoteStarredOnly] = useState(false)
   const [noteSortOrder, setNoteSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [noteSearchQuery, setNoteSearchQuery] = useState('')
+  const [editingNote, setEditingNote] = useState<SavedNote | null>(null)
+  const [editNoteDraft, setEditNoteDraft] = useState('')
+  const [editNoteTagsDraft, setEditNoteTagsDraft] = useState('')
+  const [editNoteType, setEditNoteType] = useState<NoteType>('highlight')
+  const [isSavingNoteEdit, setIsSavingNoteEdit] = useState(false)
   const [linkInput, setLinkInput] = useState(defaultImportUrl)
   const [chatPrompt, setChatPrompt] = useState('')
   const [isAsking, setIsAsking] = useState(false)
@@ -1644,7 +1673,7 @@ function App() {
     )
   }
 
-  function openReader(videoId: string) {
+  function openReader(videoId: string, startSec?: number) {
     const video = findVideoById(videos, videoId)
     const meta = videoMeta[videoId] ?? { status: 'inbox', isFavourite: false, tags: [] }
     if (currentUser && meta.status !== 'done') {
@@ -1659,7 +1688,7 @@ function App() {
       setIsTranscriptFollowing(true)
       setShowSyncPrompt(false)
       detachedAtSegmentIndexRef.current = null
-      setCurrentPosition(video.lastPositionSec || video.transcript[0]?.startSec || 0)
+      setCurrentPosition(startSec ?? (video.lastPositionSec || video.transcript[0]?.startSec || 0))
       setIsPlaying(false)
     })
 
@@ -2546,7 +2575,7 @@ function App() {
             ...guestWorkspace.temporaryNotes,
             {
               clientTempId: `note-temp-${Date.now()}`,
-              type: type === 'highlight' || type === 'thought' || type === 'videoBrief' ? 'explanation' : type,
+              type,
               source,
               quote: noteQuote,
               timestampLabel: noteTimestamp,
@@ -2554,6 +2583,9 @@ function App() {
               content,
               takeaway: source === 'thought' ? content : '',
               tags: selectedVideoMeta.tags,
+              segmentIds: transcriptSelection?.segmentIds ?? [],
+              startSec: transcriptSelection?.startSec,
+              endSec: transcriptSelection?.endSec,
             },
           ],
         })
@@ -2586,6 +2618,9 @@ function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isStarred: false,
+      segmentIds: transcriptSelection?.segmentIds ?? [],
+      startSec: transcriptSelection?.startSec,
+      endSec: transcriptSelection?.endSec,
       source,
     }
 
@@ -2595,7 +2630,6 @@ function App() {
       void updateVideoMeta(selectedVideo.id, {
         status: selectedVideoMeta.status === 'done' ? 'done' : 'learning',
       })
-      setRightTab('note')
       setShowNoteModal(false)
       setActiveAiSaveMenuId(null)
       clearNativeSelection()
@@ -2633,6 +2667,9 @@ function App() {
               content: noteContent,
               takeaway: '',
               tags: selectedVideoMeta.tags,
+              segmentIds: firstCitation ? [firstCitation.segmentId] : transcriptSelection?.segmentIds ?? [],
+              startSec: firstCitation?.startSec ?? transcriptSelection?.startSec,
+              endSec: firstCitation?.endSec ?? transcriptSelection?.endSec,
             },
           ],
         })
@@ -2672,6 +2709,9 @@ function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isStarred: false,
+      segmentIds: firstCitation ? [firstCitation.segmentId] : transcriptSelection?.segmentIds ?? [],
+      startSec: firstCitation?.startSec ?? transcriptSelection?.startSec,
+      endSec: firstCitation?.endSec ?? transcriptSelection?.endSec,
       source: 'ai',
     }
 
@@ -2891,16 +2931,35 @@ function App() {
     }
   }
 
-  async function editNoteContent(note: SavedNote) {
-    const nextContent = window.prompt('Edit note', note.content ?? note.note)
-    if (nextContent === null) return
-
-    const didUpdate = await updateNote(note.id, {
-      content: nextContent,
-      note: nextContent,
-    })
+  function openNoteEditor(note: SavedNote) {
+    setEditingNote(note)
+    setEditNoteDraft(note.content ?? note.note)
+    setEditNoteTagsDraft(note.tags.join(', '))
+    setEditNoteType(noteTypeFromSource(note))
     setActiveNoteMenuId(null)
+  }
+
+  async function saveNoteEdit() {
+    if (!editingNote || !editNoteDraft.trim()) return
+
+    const nextTags = Array.from(new Set(
+      editNoteTagsDraft
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    )).slice(0, 20)
+
+    setIsSavingNoteEdit(true)
+    const didUpdate = await updateNote(editingNote.id, {
+      content: editNoteDraft.trim(),
+      note: editNoteDraft.trim(),
+      tags: nextTags,
+      topics: nextTags,
+      type: editNoteType,
+    })
+    setIsSavingNoteEdit(false)
     if (didUpdate) {
+      setEditingNote(null)
       setToast('Note updated.')
     }
   }
@@ -3151,11 +3210,25 @@ function App() {
       new Map(sourceNotes.map((note) => [note.videoId, note.videoTitle ?? findVideoById(videos, note.videoId).title])).entries(),
     )
     const noteTagOptions = Array.from(new Set(sourceNotes.flatMap((note) => note.tags))).sort((a, b) => a.localeCompare(b))
+    const normalizedNoteSearch = noteSearchQuery.trim().toLocaleLowerCase()
     const visibleNotes = sourceNotes
       .filter((note) => noteTypeFilter === 'all' || noteTypeFromSource(note) === noteTypeFilter)
       .filter((note) => noteVideoFilter === 'all' || note.videoId === noteVideoFilter)
       .filter((note) => noteTagFilter === 'all' || note.tags.includes(noteTagFilter))
       .filter((note) => !noteStarredOnly || note.isStarred)
+      .filter((note) => {
+        if (!normalizedNoteSearch) return true
+        return [
+          note.quote,
+          note.originalSubtitle,
+          note.content,
+          note.note,
+          note.takeaway,
+          note.videoTitle,
+          noteTypeLabel(noteTypeFromSource(note)),
+          ...note.tags,
+        ].some((value) => value?.toLocaleLowerCase().includes(normalizedNoteSearch))
+      })
       .sort((a, b) => {
         const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
         const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
@@ -3181,6 +3254,16 @@ function App() {
           ))}
         </div>
         <div className="note-filter-bar">
+          <label className="note-search-control">
+            <Search size={17} />
+            <input
+              type="search"
+              value={noteSearchQuery}
+              onChange={(event) => setNoteSearchQuery(event.target.value)}
+              placeholder="Search notes"
+              aria-label="Search notes"
+            />
+          </label>
           <label className="note-filter-control">
             <span>Video:</span>
             <select value={noteVideoFilter} onChange={(event) => setNoteVideoFilter(event.target.value)}>
@@ -3237,15 +3320,17 @@ function App() {
                   </button>
                   {activeNoteMenuId === note.id ? (
                     <div className="row-menu row-menu--note">
-                      <button type="button" onClick={() => openReader(note.videoId)}>Open video</button>
-                      <button type="button" onClick={() => void editNoteContent(note)}>Edit</button>
+                      <button type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>Open at note</button>
+                      <button type="button" onClick={() => openNoteEditor(note)}>Edit</button>
                       <button type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
                     </div>
                   ) : null}
                 </div>
                 {note.originalSubtitle || note.quote ? <blockquote>{note.originalSubtitle ?? note.quote}</blockquote> : null}
-                {!isHighlight ? <p>{note.content ?? note.takeaway ?? note.note}</p> : null}
-                <span className="global-note-card__source">{note.videoTitle ?? findVideoById(videos, note.videoId).title}</span>
+                {!isHighlight ? <NoteMarkdown>{note.content ?? note.takeaway ?? note.note}</NoteMarkdown> : null}
+                <button className="global-note-card__source" type="button" onClick={() => openReader(note.videoId, noteStartTime(note))}>
+                  {note.videoTitle ?? findVideoById(videos, note.videoId).title}
+                </button>
                 <footer className="global-note-card__footer">
                   <div className="tag-row tag-row--compact global-note-card__tags">
                     {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
@@ -3256,12 +3341,18 @@ function App() {
                     aria-label={note.isStarred ? 'Unstar note' : 'Star note'}
                     onClick={() => void updateNote(note.id, { isStarred: !note.isStarred })}
                   >
-                    <ThumbsUp size={15} />
+                    <Star size={15} fill={note.isStarred ? 'currentColor' : 'none'} />
                   </button>
                 </footer>
               </article>
             )
           })}
+          {!visibleNotes.length ? (
+            <div className="empty-card global-note-empty">
+              <strong>No matching notes</strong>
+              <p>Try another search term or clear one of the filters.</p>
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -3650,13 +3741,13 @@ function App() {
                         <article key={note.id} className="note-card">
                           <span>{note.timestamp} · {noteTypeLabel(noteTypeFromSource(note))}</span>
                           <blockquote>{note.originalSubtitle ?? note.quote}</blockquote>
-                          <p>{note.content ?? note.note}</p>
+                          <NoteMarkdown>{note.content ?? note.note}</NoteMarkdown>
                           <div className="tag-row tag-row--compact">
                             {note.tags.length ? note.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>No tags</span>}
                           </div>
                           <div className="note-card__actions">
-                            <button className="text-button" type="button" onClick={() => handleSeek(Number(note.timestamp.split(':')[0]) * 60 + Number(note.timestamp.split(':')[1] ?? 0))}>Jump</button>
-                            <button className="text-button" type="button" onClick={() => void editNoteContent(note)}>Edit</button>
+                            <button className="text-button" type="button" onClick={() => handleSeek(noteStartTime(note))}>Jump</button>
+                            <button className="text-button" type="button" onClick={() => openNoteEditor(note)}>Edit</button>
                             <button className="text-button" type="button" onClick={() => void deleteNote(note.id)}>Delete</button>
                           </div>
                         </article>
@@ -3981,6 +4072,71 @@ function App() {
                   </button>
                 </div>
               </div>
+          </AppDialog>
+        ) : null}
+      </>
+
+      <>
+        {editingNote ? (
+          <AppDialog
+            className="note-modal note-editor-modal"
+            labelledBy="note-editor-title"
+            onClose={() => setEditingNote(null)}
+            as="form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveNoteEdit()
+            }}
+          >
+            <div className="note-modal__header">
+              <strong id="note-editor-title">Edit note</strong>
+              <button className="icon-button icon-button--ghost" type="button" aria-label="Close note editor" onClick={() => setEditingNote(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="note-modal__body">
+              <div className="selected-quote-card">
+                <span>{editingNote.timestamp}</span>
+                <blockquote>{editingNote.originalSubtitle ?? editingNote.quote}</blockquote>
+              </div>
+              <label className="note-editor-field">
+                <span>Type</span>
+                <select value={editNoteType} onChange={(event) => setEditNoteType(event.target.value as NoteType)}>
+                  <option value="highlight">Highlight</option>
+                  <option value="thought">Thought</option>
+                  <option value="explanation">Explanation</option>
+                  <option value="keyIdea">Key Idea</option>
+                  <option value="reviewQuestion">Review Question</option>
+                  <option value="videoBrief">Video Brief</option>
+                </select>
+              </label>
+              <label className="note-editor-field">
+                <span>Content</span>
+                <textarea
+                  value={editNoteDraft}
+                  onChange={(event) => setEditNoteDraft(event.target.value)}
+                  placeholder="Write or refine this note..."
+                  rows={8}
+                />
+              </label>
+              <label className="note-editor-field">
+                <span>Tags</span>
+                <input
+                  value={editNoteTagsDraft}
+                  onChange={(event) => setEditNoteTagsDraft(event.target.value)}
+                  placeholder="Comma-separated tags"
+                />
+                <small>Up to 20 tags. Use commas to separate them.</small>
+              </label>
+              <div className="note-modal__actions">
+                <button className="secondary-button" type="button" onClick={() => setEditingNote(null)} disabled={isSavingNoteEdit}>
+                  Cancel
+                </button>
+                <button className="secondary-button secondary-button--strong" type="submit" disabled={isSavingNoteEdit || !editNoteDraft.trim()}>
+                  {isSavingNoteEdit ? 'Saving...' : 'Save changes'}
+                </button>
+              </div>
+            </div>
           </AppDialog>
         ) : null}
       </>

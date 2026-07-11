@@ -50,3 +50,30 @@ test('every exposed learning table has RLS, authenticated ownership policies, an
   assert.match(migrations, /revoke all on table[\s\S]*from anon, authenticated/i)
   assert.match(migrations, /grant select, insert, update, delete on table[\s\S]*to authenticated/i)
 })
+
+test('learning notes preserve validated transcript anchors', async () => {
+  const [migrationSource, serverSource] = await Promise.all([
+    readFile(path.join(repositoryRoot, 'supabase/migrations/20260711112430_add_note_transcript_anchors.sql'), 'utf8'),
+    readFile(path.join(appRoot, 'server.mjs'), 'utf8'),
+  ])
+
+  assert.match(migrationSource, /add column if not exists segment_ids jsonb not null default '\[\]'::jsonb/i)
+  assert.match(migrationSource, /add column if not exists start_sec double precision/i)
+  assert.match(migrationSource, /add column if not exists end_sec double precision/i)
+  assert.match(migrationSource, /end_sec >= start_sec/i)
+  assert.match(serverSource, /segment_ids: Array\.isArray\(note\.segmentIds\)/)
+  assert.match(serverSource, /segmentIds: Array\.isArray\(row\.segment_ids\)/)
+  assert.match(serverSource, /Note transcript time range is invalid/)
+})
+
+test('notes support typed guest saves, search, markdown, and an accessible editor', async () => {
+  const appSource = await readFile(path.join(appRoot, 'src/App.tsx'), 'utf8')
+
+  assert.match(appSource, /type TemporaryNote = \{[\s\S]*?type: NoteType/)
+  assert.doesNotMatch(appSource, /type === 'highlight'[\s\S]{0,120}?\? 'explanation'/)
+  assert.match(appSource, /segmentIds: transcriptSelection\?\.segmentIds \?\? \[\]/)
+  assert.match(appSource, /noteSearchQuery/)
+  assert.match(appSource, /<NoteMarkdown>/)
+  assert.match(appSource, /labelledBy="note-editor-title"/)
+  assert.doesNotMatch(appSource, /window\.prompt/)
+})

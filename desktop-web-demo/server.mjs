@@ -313,7 +313,11 @@ function noteToRow(note, userId) {
     topics: note.topics ?? [],
     source: note.source,
     is_starred: Boolean(note.isStarred),
+    segment_ids: Array.isArray(note.segmentIds) ? note.segmentIds : [],
+    start_sec: note.startSec != null && Number.isFinite(Number(note.startSec)) ? Number(note.startSec) : null,
+    end_sec: note.endSec != null && Number.isFinite(Number(note.endSec)) ? Number(note.endSec) : null,
     created_at: note.createdAt ?? new Date().toISOString(),
+    updated_at: note.updatedAt ?? note.createdAt ?? new Date().toISOString(),
     saved_at: note.savedAt ?? new Date().toISOString(),
   }
 }
@@ -334,7 +338,11 @@ function rowToNote(row) {
     topics: row.topics ?? [],
     createdAt: row.created_at,
     savedAt: row.saved_at,
+    updatedAt: row.updated_at,
     isStarred: Boolean(row.is_starred),
+    segmentIds: Array.isArray(row.segment_ids) ? row.segment_ids : [],
+    startSec: row.start_sec ?? undefined,
+    endSec: row.end_sec ?? undefined,
     source: row.source,
   }
 }
@@ -432,6 +440,12 @@ function normalizeGuestNote(note, index, userId, video) {
   const id = clientTempId
     ? stableId('guest-note', userId, video.id, clientTempId)
     : stableId('guest-note', userId, video.id, index, quote, content)
+  const rawStartSec = note.startSec != null ? Number(note.startSec) : Number.NaN
+  const rawEndSec = note.endSec != null ? Number(note.endSec) : Number.NaN
+  const hasValidAnchorRange = Number.isFinite(rawStartSec)
+    && Number.isFinite(rawEndSec)
+    && rawStartSec >= 0
+    && rawEndSec >= rawStartSec
 
   return {
     id,
@@ -448,7 +462,13 @@ function normalizeGuestNote(note, index, userId, video) {
     topics: [],
     source,
     isStarred: false,
+    segmentIds: Array.isArray(note.segmentIds)
+      ? note.segmentIds.filter((segmentId) => typeof segmentId === 'string').slice(0, 100)
+      : [],
+    startSec: hasValidAnchorRange ? rawStartSec : undefined,
+    endSec: hasValidAnchorRange ? rawEndSec : undefined,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     savedAt: new Date().toISOString(),
   }
 }
@@ -1401,6 +1421,20 @@ app.post('/api/notes', requireAuth, async (req, res) => {
     }
     if (!Array.isArray(note.tags ?? []) || (note.tags ?? []).length > 20) {
       return res.status(400).json({ error: 'Note tags are outside the supported size.', code: 'INVALID_REQUEST' })
+    }
+    if (!Array.isArray(note.segmentIds ?? [])
+      || (note.segmentIds ?? []).length > 100
+      || (note.segmentIds ?? []).some((segmentId) => typeof segmentId !== 'string' || segmentId.length > 200)) {
+      return res.status(400).json({ error: 'Note transcript anchors are outside the supported size.', code: 'INVALID_REQUEST' })
+    }
+    const hasStartSec = note.startSec != null
+    const hasEndSec = note.endSec != null
+    if (hasStartSec !== hasEndSec
+      || (hasStartSec && (!Number.isFinite(Number(note.startSec))
+        || !Number.isFinite(Number(note.endSec))
+        || Number(note.startSec) < 0
+        || Number(note.endSec) < Number(note.startSec)))) {
+      return res.status(400).json({ error: 'Note transcript time range is invalid.', code: 'INVALID_REQUEST' })
     }
 
     const storedNote = {
