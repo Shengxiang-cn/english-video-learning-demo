@@ -1,6 +1,6 @@
-# English Video Learning Demo
+# Vist / 观知
 
-Desktop web demo for learning from long English videos.
+English Video Learning workspace for learning from long English videos.
 
 The core flow is:
 
@@ -32,4 +32,10 @@ npm run build
 
 ## Deployment
 
-This demo can be published as a static site through GitHub Pages.
+The production app is a Node/Express service deployed on Render. Render uses
+`desktop-web-demo/` as the service root, runs `npm ci && npm run build`, and
+starts the server with `npm start`. The app is not a static GitHub Pages site:
+AI questions, transcript retrieval, translations, Supabase persistence, and
+guest migration require the server and configured service credentials.
+
+Production service: `english-video-learning-demo`
